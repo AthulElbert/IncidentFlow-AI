@@ -1,5 +1,10 @@
 ﻿from app.config import Settings
-from app.services.integration_factory import build_apm_client, build_jenkins_client, build_jira_client
+from app.services.integration_factory import (
+    build_apm_client,
+    build_jenkins_client,
+    build_jira_client,
+    build_llm_client,
+)
 
 
 
@@ -21,6 +26,13 @@ def _base_settings() -> Settings:
         apm_base_url="http://localhost:9001",
         apm_verify_ssl=True,
         apm_timeout_seconds=10,
+        triage_mode="heuristic",
+        triage_confidence_floor=0.60,
+        llm_base_url="https://api.openai.com/v1",
+        llm_api_key="",
+        llm_model="gpt-4.1-mini",
+        llm_timeout_seconds=20,
+        llm_verify_ssl=True,
         dev_min_apm_improvement_pct=5.0,
         require_dev_smoke_tests=True,
         min_confidence_for_prod=0.80,
@@ -49,10 +61,13 @@ def test_factory_uses_mock_by_default():
     _, jira_mode = build_jira_client(settings)
     _, jenkins_mode = build_jenkins_client(settings)
     _, apm_mode = build_apm_client(settings)
+    llm_client, triage_mode = build_llm_client(settings)
 
     assert jira_mode == "mock"
     assert jenkins_mode == "mock"
     assert apm_mode == "mock"
+    assert llm_client is None
+    assert triage_mode == "heuristic"
 
 
 def test_factory_startup_fallback_when_real_config_missing():
@@ -64,13 +79,18 @@ def test_factory_startup_fallback_when_real_config_missing():
             "jenkins_mode": "real",
             "apm_mode": "http",
             "apm_base_url": "",
+            "triage_mode": "llm",
+            "llm_api_key": "",
         }
     )
 
     _, jira_mode = build_jira_client(settings)
     _, jenkins_mode = build_jenkins_client(settings)
     _, apm_mode = build_apm_client(settings)
+    llm_client, triage_mode = build_llm_client(settings)
 
     assert jira_mode == "mock-fallback-startup"
     assert jenkins_mode == "mock-fallback-startup"
     assert apm_mode == "mock-fallback-startup"
+    assert llm_client is None
+    assert triage_mode == "heuristic-fallback-startup"

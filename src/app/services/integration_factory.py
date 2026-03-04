@@ -1,6 +1,7 @@
 ﻿from app.adapters.apm_client import HttpAPMClient, MockAPMClient
 from app.adapters.jenkins_client import MockJenkinsClient, RealJenkinsClient
 from app.adapters.jira_client import MockJiraClient, RealJiraClient
+from app.adapters.llm_client import OpenAICompatibleLLMClient
 from app.config import Settings
 
 
@@ -59,3 +60,20 @@ def build_apm_client(settings: Settings):
             return MockAPMClient(), "mock-fallback-startup"
 
     return MockAPMClient(), "mock"
+
+
+
+def build_llm_client(settings: Settings):
+    if settings.triage_mode == "llm":
+        try:
+            return OpenAICompatibleLLMClient(
+                base_url=settings.llm_base_url,
+                api_key=settings.llm_api_key,
+                model=settings.llm_model,
+                timeout_seconds=settings.llm_timeout_seconds,
+                verify_ssl=settings.llm_verify_ssl,
+            ), "llm"
+        except Exception:
+            return None, "heuristic-fallback-startup"
+
+    return None, "heuristic"

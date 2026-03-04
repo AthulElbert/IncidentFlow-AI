@@ -6,10 +6,10 @@ from app.adapters.jenkins_client import JenkinsClient, MockJenkinsClient
 from app.adapters.jira_client import JiraClient, MockJiraClient
 from app.models.schemas import APMEvent, IncidentRecord, IncidentResponse
 from app.services.change_control import ChangeControlStore
-from app.services.classifier import classify_issue
 from app.services.fix_planner import build_ticket_text, suggest_runbook_actions
 from app.services.knowledge_base import IncidentKnowledgeBase
 from app.services.pattern_detector import PatternDetector
+from app.services.triage_agent import TriageAgent
 
 logger = logging.getLogger("app.pipeline")
 
@@ -23,12 +23,14 @@ class SupportAgentPipeline:
         jira_mode: str,
         jenkins_mode: str,
         change_store: ChangeControlStore,
+        triage_agent: TriageAgent,
     ) -> None:
         self.jira = jira_client
         self.jenkins = jenkins_client
         self.jira_mode = jira_mode
         self.jenkins_mode = jenkins_mode
         self.change_store = change_store
+        self.triage_agent = triage_agent
         self.patterns = PatternDetector()
         self.kb = IncidentKnowledgeBase(kb_file)
         self._jira_mock_fallback = MockJiraClient(project_key="SUP")
@@ -44,7 +46,11 @@ class SupportAgentPipeline:
             },
         )
 
-        issue_type, confidence, probable_cause = classify_issue(event)
+        triage = self.triage_agent.triage(event)
+        issue_type = triage.issue_type
+        confidence = triage.confidence
+        probable_cause = triage.probable_cause
+
         is_recurring, recurrence_count = self.patterns.detect_recurrence(event)
 
         similar = self.kb.find_similar(
@@ -62,7 +68,7 @@ class SupportAgentPipeline:
         )
         labels = [event.service, event.environment, issue_type, "agent-generated"]
 
-        warnings: list[str] = []
+        warnings: list[str] = list(triage.warnings)
         jira_mode_used = self.jira_mode
         jenkins_mode_used = self.jenkins_mode
 
@@ -118,6 +124,8 @@ class SupportAgentPipeline:
             jira_key=jira_ticket.key,
             jenkins_job_url=jenkins_result.url,
             proposed_actions=suggestions,
+            triage_mode_used=triage.mode_used,
+            triage_hypothesis_steps=triage.hypothesis_steps,
             issue_type=issue_type,
             confidence=confidence,
             warning_count=len(warnings),
@@ -134,6 +142,7 @@ class SupportAgentPipeline:
                 "jenkins_mode": jenkins_mode_used,
                 "change_id": change.change_id,
                 "change_status": change.status,
+                "triage_mode": triage.mode_used,
             },
         )
 
@@ -152,6 +161,8 @@ class SupportAgentPipeline:
                 "ingested_at": datetime.now(timezone.utc).isoformat(),
                 "jira_mode": jira_mode_used,
                 "jenkins_mode": jenkins_mode_used,
+                "triage_mode": triage.mode_used,
+                "triage_hypothesis_steps": triage.hypothesis_steps,
                 "warnings": warnings,
                 "change_id": change.change_id,
                 "change_status": change.status,

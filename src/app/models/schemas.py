@@ -55,6 +55,8 @@ class ChangeRecord(BaseModel):
     jira_key: str
     jenkins_job_url: str
     proposed_actions: list[str] = Field(default_factory=list)
+    triage_mode_used: str = "heuristic"
+    triage_hypothesis_steps: list[str] = Field(default_factory=list)
     issue_type: str = "unknown"
     confidence: float = 0.0
     warning_count: int = 0

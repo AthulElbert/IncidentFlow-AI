@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from app.models.schemas import APMEvent
 from app.services.change_control import ChangeControlStore
 from app.services.pipeline import SupportAgentPipeline
+from app.services.triage_agent import TriageAgent
 
 
 class BrokenJiraClient:
@@ -30,6 +31,7 @@ def test_pipeline_runtime_fallbacks(tmp_path):
         jira_mode="real",
         jenkins_mode="real",
         change_store=ChangeControlStore(str(change_file)),
+        triage_agent=TriageAgent(mode="heuristic"),
     )
 
     event = APMEvent(
@@ -46,6 +48,7 @@ def test_pipeline_runtime_fallbacks(tmp_path):
 
     assert resp.metadata["jira_mode"] == "mock-fallback"
     assert resp.metadata["jenkins_mode"] == "mock-fallback"
+    assert resp.metadata["triage_mode"] == "heuristic"
     assert len(resp.metadata["warnings"]) == 2
     assert resp.jira_ticket.key.startswith("SUP-")
     assert resp.jenkins_validation.status == "QUEUED"

@@ -8,9 +8,10 @@ This project is an assistive production-support agent that:
 4. Finds similar past incidents and prior resolutions.
 5. Creates Jira tickets (mock or real).
 6. Triggers Jenkins dev validation (mock or real).
-7. Collects APM evidence for dev-fix validation (mock or HTTP integration).
-8. Requires human approval and policy checks before prod readiness.
-9. Triggers Jenkins prod deploy with audited promotion metadata.
+7. Performs triage and root-cause hypothesis generation (heuristic or LLM).
+8. Collects APM evidence for dev-fix validation (mock or HTTP integration).
+9. Requires human approval and policy checks before prod readiness.
+10. Triggers Jenkins prod deploy with audited promotion metadata.
 
 ## Tech Stack
 
@@ -29,9 +30,10 @@ src/app/config.py                       # Env settings + .env loading
 src/app/security.py                     # API-key/JWT auth + role checks
 src/app/logging_config.py               # JSON structured logging
 src/app/models/schemas.py               # Request/response models
-src/app/services/classifier.py          # Issue classification heuristics
+src/app/services/classifier.py          # Heuristic fallback classifier
 src/app/services/pattern_detector.py
 src/app/services/knowledge_base.py      # Similar incident lookup + local store
+src/app/services/triage_agent.py        # LLM/heuristic triage + hypothesis generation
 src/app/services/fix_planner.py         # Runbook/config action suggestions
 src/app/services/integration_factory.py # Selects mock vs real adapters
 src/app/services/pipeline.py            # End-to-end orchestration + fallbacks
@@ -40,6 +42,7 @@ src/app/services/change_control.py      # Approval gate + policy checks + persis
 src/app/adapters/jira_client.py         # Jira adapters
 src/app/adapters/jenkins_client.py      # Jenkins adapters (dev + prod)
 src/app/adapters/apm_client.py          # APM evidence adapters (mock + http)
+src/app/adapters/llm_client.py          # OpenAI-compatible LLM triage adapter
 data/incident_history.json              # Seeded incident history
 data/change_records.json                # Change approval records
 ```
@@ -63,6 +66,11 @@ Policy settings:
 - `MIN_CONFIDENCE_FOR_PROD`
 - `REQUIRE_ZERO_WARNINGS_FOR_PROD`
 - `ALLOWED_JENKINS_STATES_FOR_PROD`
+
+Triage settings:
+- `TRIAGE_MODE`: `heuristic` | `llm`
+- `TRIAGE_CONFIDENCE_FLOOR`
+- `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `LLM_TIMEOUT_SECONDS`, `LLM_VERIFY_SSL`
 
 Dev evidence settings:
 - `APM_MODE`: `mock` | `http`
@@ -144,7 +152,7 @@ Role permissions:
 
 ## Typical Flow
 
-1. Process incident using `/v1/incidents/process` or `/v1/incidents/mock`.
+1. Process incident using `/v1/incidents/process` or `/v1/incidents/mock` (triage + root-cause hypothesis generated).
 2. Read `metadata.change_id` from response.
 3. Review change using `GET /v1/changes/{change_id}`.
 4. Execute dev fix with `POST /v1/changes/{change_id}/execute-dev`.
@@ -184,7 +192,7 @@ Promotion outcomes:
 
 Notes:
 - If real integration fails at runtime, pipeline auto-falls back to mock and includes warnings in `metadata.warnings`.
-- `/health` shows active startup modes and auth source (`api_key` or `jwt`).
+- `/health` shows active startup modes, including `triage_mode`, `apm_mode`, and auth source (`api_key` or `jwt`).
 
 ## Assistive Behavior
 
@@ -192,3 +200,5 @@ Notes:
 - Human approval is required.
 - Policy checks enforce safe promotion criteria before `ready_for_prod`.
 - Promotion is role-protected and audited.
+
+

@@ -20,8 +20,14 @@ from app.models.schemas import (
 from app.security import AuthManager, Principal
 from app.services.change_control import ChangeControlStore, PolicyConfig
 from app.services.dev_fix_executor import DevFixExecutor
-from app.services.integration_factory import build_apm_client, build_jenkins_client, build_jira_client
+from app.services.integration_factory import (
+    build_apm_client,
+    build_jenkins_client,
+    build_jira_client,
+    build_llm_client,
+)
 from app.services.pipeline import SupportAgentPipeline
+from app.services.triage_agent import TriageAgent
 
 app = FastAPI(title="Production Support Agent MVP", version="0.10.0")
 
@@ -44,6 +50,12 @@ change_store = ChangeControlStore(
 jira_client, jira_mode = build_jira_client(settings)
 jenkins_client, jenkins_mode = build_jenkins_client(settings)
 apm_client, apm_mode = build_apm_client(settings)
+llm_client, triage_mode = build_llm_client(settings)
+triage_agent = TriageAgent(
+    mode=settings.triage_mode,
+    llm_client=llm_client,
+    confidence_floor=settings.triage_confidence_floor,
+)
 dev_executor = DevFixExecutor(
     jenkins_client=jenkins_client,
     apm_client=apm_client,
@@ -58,6 +70,7 @@ pipeline = SupportAgentPipeline(
     jira_mode=jira_mode,
     jenkins_mode=jenkins_mode,
     change_store=change_store,
+    triage_agent=triage_agent,
 )
 
 auth = AuthManager(
@@ -86,6 +99,7 @@ logger.info(
         "jira_mode": jira_mode,
         "jenkins_mode": jenkins_mode,
         "apm_mode": apm_mode,
+        "triage_mode": triage_mode,
         "log_level": settings.log_level,
         "min_confidence_for_prod": settings.min_confidence_for_prod,
         "auth_enabled": settings.auth_enabled,
@@ -101,6 +115,7 @@ def health(principal: Principal = Depends(viewer_auth)) -> dict[str, str]:
         "jira_mode": jira_mode,
         "jenkins_mode": jenkins_mode,
         "apm_mode": apm_mode,
+        "triage_mode": triage_mode,
         "log_level": settings.log_level,
         "min_confidence_for_prod": str(settings.min_confidence_for_prod),
         "auth_role": principal.role,

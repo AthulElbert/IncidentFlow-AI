@@ -57,6 +57,13 @@ class Settings:
     apm_base_url: str
     apm_verify_ssl: bool
     apm_timeout_seconds: int
+    triage_mode: str
+    triage_confidence_floor: float
+    llm_base_url: str
+    llm_api_key: str
+    llm_model: str
+    llm_timeout_seconds: int
+    llm_verify_ssl: bool
     dev_min_apm_improvement_pct: float
     require_dev_smoke_tests: bool
     min_confidence_for_prod: float
@@ -104,6 +111,13 @@ def load_settings(base_dir: str | None = None) -> Settings:
         apm_base_url=os.getenv("APM_BASE_URL", "http://localhost:9001").strip(),
         apm_verify_ssl=_as_bool(os.getenv("APM_VERIFY_SSL"), default=True),
         apm_timeout_seconds=_as_int(os.getenv("APM_TIMEOUT_SECONDS"), default=10),
+        triage_mode=os.getenv("TRIAGE_MODE", "heuristic").strip().lower(),
+        triage_confidence_floor=_as_float(os.getenv("TRIAGE_CONFIDENCE_FLOOR"), default=0.60),
+        llm_base_url=os.getenv("LLM_BASE_URL", "https://api.openai.com/v1").strip(),
+        llm_api_key=os.getenv("LLM_API_KEY", "").strip(),
+        llm_model=os.getenv("LLM_MODEL", "gpt-4.1-mini").strip(),
+        llm_timeout_seconds=_as_int(os.getenv("LLM_TIMEOUT_SECONDS"), default=20),
+        llm_verify_ssl=_as_bool(os.getenv("LLM_VERIFY_SSL"), default=True),
         dev_min_apm_improvement_pct=_as_float(os.getenv("DEV_MIN_APM_IMPROVEMENT_PCT"), default=5.0),
         require_dev_smoke_tests=_as_bool(os.getenv("REQUIRE_DEV_SMOKE_TESTS"), default=True),
         min_confidence_for_prod=_as_float(os.getenv("MIN_CONFIDENCE_FOR_PROD"), default=0.80),

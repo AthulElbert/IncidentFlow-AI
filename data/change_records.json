@@ -12,6 +12,8 @@
       "Scale service replicas by +1 in dev and verify latency trend.",
       "Temporarily increase upstream timeout by 10-15% in dev config."
     ],
+    "triage_mode_used": "heuristic",
+    "triage_hypothesis_steps": [],
     "issue_type": "unknown",
     "confidence": 0.0,
     "warning_count": 0,
@@ -48,6 +50,8 @@
       "Collect expanded logs and trace ids for the failing request path.",
       "Create manual triage task for SRE/on-call with service owner."
     ],
+    "triage_mode_used": "heuristic",
+    "triage_hypothesis_steps": [],
     "issue_type": "unknown",
     "confidence": 0.55,
     "warning_count": 0,
@@ -88,6 +92,8 @@
       "Scale service replicas by +1 in dev and verify latency trend.",
       "Temporarily increase upstream timeout by 10-15% in dev config."
     ],
+    "triage_mode_used": "heuristic",
+    "triage_hypothesis_steps": [],
     "issue_type": "performance_degradation",
     "confidence": 0.91,
     "warning_count": 0,
@@ -125,6 +131,8 @@
       "Scale service replicas by +1 in dev and verify latency trend.",
       "Temporarily increase upstream timeout by 10-15% in dev config."
     ],
+    "triage_mode_used": "heuristic",
+    "triage_hypothesis_steps": [],
     "issue_type": "performance_degradation",
     "confidence": 0.91,
     "warning_count": 0,
@@ -162,6 +170,8 @@
       "Scale service replicas by +1 in dev and verify latency trend.",
       "Temporarily increase upstream timeout by 10-15% in dev config."
     ],
+    "triage_mode_used": "heuristic",
+    "triage_hypothesis_steps": [],
     "issue_type": "performance_degradation",
     "confidence": 0.91,
     "warning_count": 0,
@@ -199,6 +209,8 @@
       "Scale service replicas by +1 in dev and verify latency trend.",
       "Temporarily increase upstream timeout by 10-15% in dev config."
     ],
+    "triage_mode_used": "heuristic",
+    "triage_hypothesis_steps": [],
     "issue_type": "performance_degradation",
     "confidence": 0.91,
     "warning_count": 0,
@@ -236,6 +248,8 @@
       "Scale service replicas by +1 in dev and verify latency trend.",
       "Temporarily increase upstream timeout by 10-15% in dev config."
     ],
+    "triage_mode_used": "heuristic",
+    "triage_hypothesis_steps": [],
     "issue_type": "performance_degradation",
     "confidence": 0.91,
     "warning_count": 0,
@@ -251,6 +265,51 @@
     "deployment_state": "ready_for_prod",
     "policy_reasons": [],
     "created_at": "2026-03-04T18:24:54.816115Z",
+    "decided_at": null,
+    "decided_by": null,
+    "decision_comment": null,
+    "promoted_at": null,
+    "promoted_by": null,
+    "promotion_comment": null,
+    "promotion_result": null,
+    "prod_deploy_url": null
+  },
+  {
+    "change_id": "CHG-3BE2590B",
+    "incident_id": "INC-B68906A9",
+    "service": "payments-service",
+    "environment": "prod",
+    "summary": "[New] payments-service - performance_degradation in prod",
+    "jira_key": "SUP-0AFE72BC",
+    "jenkins_job_url": "https://jenkins.company.com/job/payments-service-dev-validation/3519/",
+    "proposed_actions": [
+      "Check p95/p99 latency breakdown by endpoint in APM.",
+      "Scale service replicas by +1 in dev and verify latency trend.",
+      "Temporarily increase upstream timeout by 10-15% in dev config."
+    ],
+    "triage_mode_used": "heuristic",
+    "triage_hypothesis_steps": [
+      "Metric=latency_p99_ms, value=1250.0, threshold=800.0",
+      "Message signal: High latency observed in checkout endpoint",
+      "Environment=prod, service=payments-service"
+    ],
+    "issue_type": "performance_degradation",
+    "confidence": 0.91,
+    "warning_count": 0,
+    "jenkins_status": "QUEUED",
+    "dev_execution_status": "not_started",
+    "dev_execution_url": null,
+    "dev_apm_improvement_pct": null,
+    "dev_smoke_tests_passed": null,
+    "dev_notes": null,
+    "dev_executed_at": null,
+    "dev_executed_by": null,
+    "status": "pending_approval",
+    "deployment_state": "awaiting_dev_execution",
+    "policy_reasons": [
+      "dev execution evidence is not in passed state"
+    ],
+    "created_at": "2026-03-04T18:40:26.024083Z",
     "decided_at": null,
     "decided_by": null,
     "decision_comment": null,
