@@ -20,7 +20,8 @@ This project is an assistive production-support agent that:
 - Pydantic
 - python-dotenv
 - PyJWT
-- Env-driven adapters for Jira, Jenkins, and APM
+- psycopg (optional, for Postgres storage backend)
+- Env-driven adapters for Jira, Jenkins, APM, and LLM triage
 
 ## Project Structure
 
@@ -32,13 +33,13 @@ src/app/logging_config.py               # JSON structured logging
 src/app/models/schemas.py               # Request/response models
 src/app/services/classifier.py          # Heuristic fallback classifier
 src/app/services/pattern_detector.py
-src/app/services/knowledge_base.py      # Similar incident lookup + local store
+src/app/services/knowledge_base.py      # Similar incident lookup (JSON or Postgres)
 src/app/services/triage_agent.py        # LLM/heuristic triage + hypothesis generation
 src/app/services/fix_planner.py         # Runbook/config action suggestions
 src/app/services/integration_factory.py # Selects mock vs real adapters
 src/app/services/pipeline.py            # End-to-end orchestration + fallbacks
 src/app/services/dev_fix_executor.py    # Jenkins + APM evidence based dev validation
-src/app/services/change_control.py      # Approval gate + policy checks + persisted change records
+src/app/services/change_control.py      # Approval gate + policy checks (JSON or Postgres)
 src/app/adapters/jira_client.py         # Jira adapters
 src/app/adapters/jenkins_client.py      # Jenkins adapters (dev + prod)
 src/app/adapters/apm_client.py          # APM evidence adapters (mock + http)
@@ -66,6 +67,10 @@ Policy settings:
 - `MIN_CONFIDENCE_FOR_PROD`
 - `REQUIRE_ZERO_WARNINGS_FOR_PROD`
 - `ALLOWED_JENKINS_STATES_FOR_PROD`
+
+Storage settings:
+- `STORAGE_BACKEND`: `json` | `postgres`
+- `DATABASE_URL` (required when `STORAGE_BACKEND=postgres`)
 
 Triage settings:
 - `TRIAGE_MODE`: `heuristic` | `llm`
@@ -192,7 +197,7 @@ Promotion outcomes:
 
 Notes:
 - If real integration fails at runtime, pipeline auto-falls back to mock and includes warnings in `metadata.warnings`.
-- `/health` shows active startup modes, including `triage_mode`, `apm_mode`, and auth source (`api_key` or `jwt`).
+- `/health` shows active startup modes, including `triage_mode`, `apm_mode`, `storage_backend`, and auth source (`api_key` or `jwt`).
 
 ## Assistive Behavior
 

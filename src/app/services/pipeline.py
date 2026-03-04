@@ -24,6 +24,8 @@ class SupportAgentPipeline:
         jenkins_mode: str,
         change_store: ChangeControlStore,
         triage_agent: TriageAgent,
+        storage_backend: str = "json",
+        database_url: str = "",
     ) -> None:
         self.jira = jira_client
         self.jenkins = jenkins_client
@@ -32,7 +34,11 @@ class SupportAgentPipeline:
         self.change_store = change_store
         self.triage_agent = triage_agent
         self.patterns = PatternDetector()
-        self.kb = IncidentKnowledgeBase(kb_file)
+        self.kb = IncidentKnowledgeBase(
+            kb_file,
+            storage_backend=storage_backend,
+            database_url=database_url,
+        )
         self._jira_mock_fallback = MockJiraClient(project_key="SUP")
         self._jenkins_mock_fallback = MockJenkinsClient()
 

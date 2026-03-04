@@ -10,6 +10,8 @@ from app.services.integration_factory import (
 
 def _base_settings() -> Settings:
     return Settings(
+        storage_backend="json",
+        database_url="",
         jira_mode="mock",
         jira_base_url="",
         jira_project_key="SUP",

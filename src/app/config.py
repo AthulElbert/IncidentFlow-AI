@@ -41,6 +41,8 @@ def _as_list(value: str | None, default: list[str]) -> list[str]:
 
 @dataclass(frozen=True)
 class Settings:
+    storage_backend: str
+    database_url: str
     jira_mode: str
     jira_base_url: str
     jira_project_key: str
@@ -95,6 +97,8 @@ def load_settings(base_dir: str | None = None) -> Settings:
         load_dotenv(override=False)
 
     return Settings(
+        storage_backend=os.getenv("STORAGE_BACKEND", "json").strip().lower(),
+        database_url=os.getenv("DATABASE_URL", "").strip(),
         jira_mode=os.getenv("JIRA_MODE", "mock").strip().lower(),
         jira_base_url=os.getenv("JIRA_BASE_URL", "").strip(),
         jira_project_key=os.getenv("JIRA_PROJECT_KEY", "SUP").strip(),

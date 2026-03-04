@@ -20,19 +20,33 @@ class PolicyConfig:
 
 
 class ChangeControlStore:
-    def __init__(self, data_file: str, policy: PolicyConfig | None = None) -> None:
+    def __init__(
+        self,
+        data_file: str,
+        policy: PolicyConfig | None = None,
+        storage_backend: str = "json",
+        database_url: str = "",
+    ) -> None:
         self.data_path = Path(data_file)
         self._lock = Lock()
         self.policy = policy or PolicyConfig()
+        self.storage_backend = storage_backend.strip().lower()
+        self.database_url = database_url.strip()
+        self._use_postgres = self.storage_backend == "postgres"
         self._records: list[ChangeRecord] = self._load()
 
     def _load(self) -> list[ChangeRecord]:
+        if self._use_postgres:
+            return self._load_from_postgres()
         if not self.data_path.exists():
             return []
         raw = json.loads(self.data_path.read_text(encoding="utf-8-sig"))
         return [ChangeRecord(**item) for item in raw]
 
     def _persist(self) -> None:
+        if self._use_postgres:
+            self._persist_postgres()
+            return
         payload = [item.model_dump(mode="json") for item in self._records]
         self.data_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
@@ -256,3 +270,62 @@ class ChangeControlStore:
                 return updated
 
         raise ValueError("Change not found")
+
+    def _load_from_postgres(self) -> list[ChangeRecord]:
+        conn = self._pg_connect()
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS change_records (
+                        change_id TEXT PRIMARY KEY,
+                        payload JSONB NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                )
+                cur.execute("SELECT payload FROM change_records ORDER BY created_at ASC")
+                rows = cur.fetchall()
+        conn.close()
+        return [ChangeRecord(**row[0]) for row in rows]
+
+    def _persist_postgres(self) -> None:
+        conn = self._pg_connect()
+        payloads = [
+            (
+                record.change_id,
+                json.dumps(record.model_dump(mode="json")),
+                record.created_at.isoformat(),
+            )
+            for record in self._records
+        ]
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS change_records (
+                        change_id TEXT PRIMARY KEY,
+                        payload JSONB NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                )
+                cur.execute("DELETE FROM change_records")
+                for change_id, payload, created_at in payloads:
+                    cur.execute(
+                        """
+                        INSERT INTO change_records (change_id, payload, created_at)
+                        VALUES (%s, %s::jsonb, %s)
+                        """,
+                        (change_id, payload, created_at),
+                    )
+        conn.close()
+
+    def _pg_connect(self):
+        if not self.database_url:
+            raise ValueError("STORAGE_BACKEND=postgres requires DATABASE_URL")
+        try:
+            import psycopg
+        except Exception as exc:  # pragma: no cover - import guard
+            raise ValueError("Postgres backend requires 'psycopg' package") from exc
+        return psycopg.connect(self.database_url)

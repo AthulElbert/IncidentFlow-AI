@@ -68,12 +68,13 @@ Main building blocks:
   - Jenkins adapter
   - APM adapter
   - LLM adapter (OpenAI-compatible)
-- Persistent JSON stores for:
-  - incident history (`data/incident_history.json`)
-  - change records (`data/change_records.json`)
+- Persistent storage backend:
+  - `json` (local files for MVP/dev)
+  - `postgres` (shared persistence for multi-instance deployment)
 
 Key implementation characteristics:
 - env-driven integration mode switching (`mock`/`real`)
+- env-driven storage switching (`STORAGE_BACKEND=json|postgres`)
 - graceful fallback to mock adapters on runtime integration failure
 - structured logs for traceability
 - role-based access control with API-key, JWT, or hybrid auth modes

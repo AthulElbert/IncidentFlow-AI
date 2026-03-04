@@ -45,6 +45,8 @@ change_store = ChangeControlStore(
         require_zero_warnings_for_prod=settings.require_zero_warnings_for_prod,
         allowed_jenkins_states_for_prod=settings.allowed_jenkins_states_for_prod,
     ),
+    storage_backend=settings.storage_backend,
+    database_url=settings.database_url,
 )
 
 jira_client, jira_mode = build_jira_client(settings)
@@ -71,6 +73,8 @@ pipeline = SupportAgentPipeline(
     jenkins_mode=jenkins_mode,
     change_store=change_store,
     triage_agent=triage_agent,
+    storage_backend=settings.storage_backend,
+    database_url=settings.database_url,
 )
 
 auth = AuthManager(
@@ -101,6 +105,7 @@ logger.info(
         "apm_mode": apm_mode,
         "triage_mode": triage_mode,
         "log_level": settings.log_level,
+        "storage_backend": settings.storage_backend,
         "min_confidence_for_prod": settings.min_confidence_for_prod,
         "auth_enabled": settings.auth_enabled,
         "auth_mode": settings.auth_mode,
@@ -117,6 +122,7 @@ def health(principal: Principal = Depends(viewer_auth)) -> dict[str, str]:
         "apm_mode": apm_mode,
         "triage_mode": triage_mode,
         "log_level": settings.log_level,
+        "storage_backend": settings.storage_backend,
         "min_confidence_for_prod": str(settings.min_confidence_for_prod),
         "auth_role": principal.role,
         "auth_source": principal.source,
