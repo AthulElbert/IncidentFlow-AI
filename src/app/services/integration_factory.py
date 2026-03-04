@@ -1,0 +1,61 @@
+﻿from app.adapters.apm_client import HttpAPMClient, MockAPMClient
+from app.adapters.jenkins_client import MockJenkinsClient, RealJenkinsClient
+from app.adapters.jira_client import MockJiraClient, RealJiraClient
+from app.config import Settings
+
+
+
+def build_jira_client(settings: Settings):
+    if settings.jira_mode == "real":
+        try:
+            return RealJiraClient(
+                base_url=settings.jira_base_url,
+                project_key=settings.jira_project_key,
+                email=settings.jira_email,
+                api_token=settings.jira_api_token,
+            ), "real"
+        except Exception:
+            return MockJiraClient(project_key=settings.jira_project_key), "mock-fallback-startup"
+
+    return MockJiraClient(project_key=settings.jira_project_key), "mock"
+
+
+
+def build_jenkins_client(settings: Settings):
+    if settings.jenkins_mode == "real":
+        try:
+            return RealJenkinsClient(
+                base_url=settings.jenkins_base_url,
+                user=settings.jenkins_user,
+                api_token=settings.jenkins_api_token,
+                job_suffix=settings.jenkins_job_suffix,
+                prod_job_suffix=settings.jenkins_prod_job_suffix,
+                verify_ssl=settings.jenkins_verify_ssl,
+            ), "real"
+        except Exception:
+            return MockJenkinsClient(
+                base_url=settings.jenkins_base_url,
+                job_suffix=settings.jenkins_job_suffix,
+                prod_job_suffix=settings.jenkins_prod_job_suffix,
+            ), "mock-fallback-startup"
+
+    return MockJenkinsClient(
+        base_url=settings.jenkins_base_url,
+        job_suffix=settings.jenkins_job_suffix,
+        prod_job_suffix=settings.jenkins_prod_job_suffix,
+    ), "mock"
+
+
+
+def build_apm_client(settings: Settings):
+    if settings.apm_mode == "http":
+        try:
+            return HttpAPMClient(
+                base_url=settings.apm_base_url,
+                timeout_seconds=settings.apm_timeout_seconds,
+                verify_ssl=settings.apm_verify_ssl,
+            ), "http"
+        except Exception:
+            return MockAPMClient(), "mock-fallback-startup"
+
+    return MockAPMClient(), "mock"
