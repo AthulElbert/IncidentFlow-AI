@@ -151,12 +151,15 @@ class PRPreparationService:
             "+change:",
             f"+  id: {record.change_id}",
             f"+  summary: \"{record.summary}\"",
+            "+issue_type: " + record.issue_type,
             "+mitigation:",
+            "+  strategy: \"auto-generated-template\"",
             "+  actions:",
         ]
         for action in record.proposed_actions:
             lines.append(f"+    - \"{action}\"")
 
+        lines.extend(self._issue_specific_template_lines(record.issue_type))
         lines.extend(
             [
                 "+validation:",
@@ -169,6 +172,51 @@ class PRPreparationService:
         if comment:
             lines.append(f"+reviewer_note: \"{comment}\"")
         return "\n".join(lines) + "\n"
+
+    def _issue_specific_template_lines(self, issue_type: str) -> list[str]:
+        if issue_type == "performance_degradation":
+            return [
+                "+perf_tuning:",
+                "+  connection_pool_max: 80",
+                "+  request_timeout_ms: 2200",
+                "+  cache:",
+                "+    enabled: true",
+                "+    ttl_seconds: 60",
+            ]
+        if issue_type == "application_error":
+            return [
+                "+error_guardrails:",
+                "+  feature_flag_fallback: true",
+                "+  retry:",
+                "+    max_attempts: 2",
+                "+    backoff_ms: 150",
+                "+  circuit_breaker:",
+                "+    failure_threshold: 5",
+                "+    reset_timeout_seconds: 30",
+            ]
+        if issue_type == "dependency_failure":
+            return [
+                "+dependency_protection:",
+                "+  upstream_timeout_ms: 1200",
+                "+  fallback_response_mode: \"cached-or-default\"",
+                "+  pool:",
+                "+    max_inflight: 40",
+                "+    queue_limit: 200",
+            ]
+        if issue_type == "resource_saturation":
+            return [
+                "+resource_controls:",
+                "+  autoscaling:",
+                "+    min_replicas: 4",
+                "+    max_replicas: 12",
+                "+  cpu_target_utilization_pct: 65",
+                "+  memory_target_utilization_pct: 70",
+            ]
+        return [
+            "+manual_triage:",
+            "+  required: true",
+            "+  reason: \"unknown issue type; collect deeper diagnostic evidence\"",
+        ]
 
     def _ensure_local_branch(self, branch: str) -> tuple[bool, str]:
         if self.local_branch_mode != "git":

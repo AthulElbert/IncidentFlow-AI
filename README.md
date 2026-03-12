@@ -215,10 +215,11 @@ Role permissions:
 3. Review change using `GET /v1/changes/{change_id}`.
 4. Prepare draft PR and test evidence with `POST /v1/changes/{change_id}/prepare-pr`.
 5. This step generates a patch artifact file in `PR_PATCH_OUTPUT_DIR` (for example `generated_patches/CHG-XXXX.patch`) and optionally creates a local git branch when `PR_LOCAL_BRANCH_MODE=git`.
-6. Execute dev fix with `POST /v1/changes/{change_id}/execute-dev`.
-7. Approve/reject using `POST /v1/changes/{change_id}/decision`.
-8. If `deployment_state=ready_for_prod`, promote using `POST /v1/changes/{change_id}/promote`.
-9. Promotion triggers Jenkins prod job and stores queue/build URL + result.
+6. Patch artifact content is issue-aware (performance/error/dependency/resource/unknown templates).
+7. Execute dev fix with `POST /v1/changes/{change_id}/execute-dev`.
+8. Approve/reject using `POST /v1/changes/{change_id}/decision`.
+9. If `deployment_state=ready_for_prod`, promote using `POST /v1/changes/{change_id}/promote`.
+10. Promotion triggers Jenkins prod job and stores queue/build URL + result.
 
 ## Policy Gate Behavior
 
