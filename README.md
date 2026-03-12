@@ -95,6 +95,12 @@ Key settings groups:
   - `PR_REPO_SLUG`, `PR_GITHUB_TOKEN`, `PR_GITHUB_API_BASE_URL`, `PR_BASE_BRANCH`
   - `PR_LOCAL_BRANCH_MODE`: `spec` | `git`
   - `PR_PATCH_OUTPUT_DIR`
+- Code change pipeline:
+  - `CODE_CHANGE_MODE`: `spec` | `sandbox_git`
+  - `CODE_CHANGE_ALLOWED_PATHS`
+  - `CODE_CHANGE_MAX_LINES`
+  - `CODE_CHANGE_AUTO_COMMIT`
+  - `CODE_CHANGE_AUTO_PUSH`
 - Test evidence:
   - `TEST_EVIDENCE_MODE`: `mock` | `pytest`
   - `TEST_EVIDENCE_COMMAND`
@@ -157,6 +163,7 @@ Notes:
   - `resource_saturation`
   - `unknown` (manual triage template)
 - If `PR_LOCAL_BRANCH_MODE=git`, service attempts `git branch <generated-branch>`
+- If `CODE_CHANGE_MODE=sandbox_git`, service creates/uses `.agent_worktrees/<branch>` and applies real file edits with path/size guardrails.
 
 ## Dashboard Demo
 

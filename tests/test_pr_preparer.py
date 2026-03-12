@@ -1,6 +1,9 @@
 from datetime import datetime, timezone
 from pathlib import Path
+import shutil
+import subprocess
 
+import pytest
 from app.adapters.pr_client import MockPRClient
 from app.models.schemas import ChangeRecord
 from app.services.pr_preparer import PRPreparationService
@@ -85,3 +88,49 @@ def test_pr_preparer_generates_issue_specific_patch_templates(tmp_path: Path):
         result = service.prepare(record, requested_by="approver-1")
         content = Path(result.patch_artifact_path).read_text(encoding="utf-8")
         assert marker in content
+
+
+def test_pr_preparer_applies_sandbox_git_change(tmp_path: Path):
+    if shutil.which("git") is None:
+        pytest.skip("git not available")
+
+    subprocess.run(["git", "init"], cwd=str(tmp_path), check=True, capture_output=True, text=True)
+    subprocess.run(["git", "config", "user.email", "agent@example.com"], cwd=str(tmp_path), check=True, capture_output=True, text=True)
+    subprocess.run(["git", "config", "user.name", "Agent Bot"], cwd=str(tmp_path), check=True, capture_output=True, text=True)
+    (tmp_path / "README.md").write_text("seed\n", encoding="utf-8")
+    subprocess.run(["git", "add", "README.md"], cwd=str(tmp_path), check=True, capture_output=True, text=True)
+    subprocess.run(["git", "commit", "-m", "init"], cwd=str(tmp_path), check=True, capture_output=True, text=True)
+
+    record = ChangeRecord(
+        change_id="CHG-SBOX1",
+        incident_id="INC-SBOX1",
+        service="payments-service",
+        environment="prod",
+        summary="Sandbox branch change",
+        jira_key="SUP-11",
+        jenkins_job_url="https://jenkins/job/1",
+        proposed_actions=["Tune timeout"],
+        triage_mode_used="heuristic",
+        triage_hypothesis_steps=["h1"],
+        issue_type="performance_degradation",
+        confidence=0.91,
+        warning_count=0,
+        jenkins_status="QUEUED",
+        created_at=datetime.now(timezone.utc),
+    )
+    service = PRPreparationService(
+        pr_client=MockPRClient(repo_slug="demo/repo"),
+        test_mode="mock",
+        repo_root=str(tmp_path),
+        code_change_mode="sandbox_git",
+        code_change_allowed_paths="config/",
+        code_change_auto_commit=False,
+        code_change_auto_push=False,
+    )
+    result = service.prepare(record, requested_by="approver-1")
+
+    assert result.code_change_status == "applied"
+    assert result.sandbox_worktree_path
+    assert "config/service-overrides.yaml" in result.changed_files
+    applied_file = Path(result.sandbox_worktree_path) / "config" / "service-overrides.yaml"
+    assert applied_file.exists()

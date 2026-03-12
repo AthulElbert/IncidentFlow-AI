@@ -33,4 +33,5 @@ def test_prepare_pr_endpoint_flow(monkeypatch):
     assert body["pr_branch"].startswith("agent/")
     assert body["patch_artifact_path"].endswith(".patch")
     assert body["local_branch_created"] is False
+    assert body["code_change_status"] == "not_started"
     assert body["test_evidence_status"] == "passed"

@@ -331,5 +331,19 @@
       "Temporarily increase upstream timeout by 10-15% in dev config."
     ],
     "created_at": "2026-03-12T18:13:40.914183Z"
+  },
+  {
+    "incident_id": "INC-914C719E",
+    "service": "payments-service",
+    "metric": "latency_p99_ms",
+    "issue_type": "performance_degradation",
+    "summary": "[New] payments-service - performance_degradation in prod",
+    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
+    "runbook_actions": [
+      "Check p95/p99 latency breakdown by endpoint in APM.",
+      "Scale service replicas by +1 in dev and verify latency trend.",
+      "Temporarily increase upstream timeout by 10-15% in dev config."
+    ],
+    "created_at": "2026-03-12T18:30:02.792111Z"
   }
 ]

@@ -79,6 +79,12 @@ class ChangeRecord(BaseModel):
     patch_preview: str | None = None
     local_branch_created: bool = False
     local_branch_message: str | None = None
+    code_change_status: Literal["not_started", "applied", "failed"] = "not_started"
+    code_change_message: str | None = None
+    sandbox_worktree_path: str | None = None
+    changed_files: list[str] = Field(default_factory=list)
+    commit_sha: str | None = None
+    push_status: str | None = None
     test_evidence_status: Literal["not_run", "passed", "failed"] = "not_run"
     test_command: str | None = None
     test_output: str | None = None
@@ -152,6 +158,12 @@ class PRPrepareResponse(BaseModel):
     local_branch_created: bool
     local_branch_message: str
     patch_artifact_path: str
+    code_change_status: str = "not_started"
+    code_change_message: str = ""
+    sandbox_worktree_path: str = ""
+    changed_files: list[str] = Field(default_factory=list)
+    commit_sha: str = ""
+    push_status: str = ""
     test_evidence_status: str
     test_command: str
     test_pass_rate: float

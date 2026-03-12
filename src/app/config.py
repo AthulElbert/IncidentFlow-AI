@@ -50,6 +50,11 @@ class Settings:
     pr_base_branch: str
     pr_local_branch_mode: str
     pr_patch_output_dir: str
+    code_change_mode: str
+    code_change_allowed_paths: str
+    code_change_max_lines: int
+    code_change_auto_commit: bool
+    code_change_auto_push: bool
     test_evidence_mode: str
     test_evidence_command: str
     test_evidence_timeout_seconds: int
@@ -116,6 +121,11 @@ def load_settings(base_dir: str | None = None) -> Settings:
         pr_base_branch=os.getenv("PR_BASE_BRANCH", "main").strip(),
         pr_local_branch_mode=os.getenv("PR_LOCAL_BRANCH_MODE", "spec").strip().lower(),
         pr_patch_output_dir=os.getenv("PR_PATCH_OUTPUT_DIR", "generated_patches").strip(),
+        code_change_mode=os.getenv("CODE_CHANGE_MODE", "spec").strip().lower(),
+        code_change_allowed_paths=os.getenv("CODE_CHANGE_ALLOWED_PATHS", "config/,runbooks/").strip(),
+        code_change_max_lines=_as_int(os.getenv("CODE_CHANGE_MAX_LINES"), default=200),
+        code_change_auto_commit=_as_bool(os.getenv("CODE_CHANGE_AUTO_COMMIT"), default=False),
+        code_change_auto_push=_as_bool(os.getenv("CODE_CHANGE_AUTO_PUSH"), default=False),
         test_evidence_mode=os.getenv("TEST_EVIDENCE_MODE", "mock").strip().lower(),
         test_evidence_command=os.getenv("TEST_EVIDENCE_COMMAND", "python -m pytest -q tests").strip(),
         test_evidence_timeout_seconds=_as_int(os.getenv("TEST_EVIDENCE_TIMEOUT_SECONDS"), default=120),

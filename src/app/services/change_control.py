@@ -284,6 +284,12 @@ class ChangeControlStore:
         patch_preview: str,
         local_branch_created: bool,
         local_branch_message: str,
+        code_change_status: str,
+        code_change_message: str,
+        sandbox_worktree_path: str,
+        changed_files: list[str],
+        commit_sha: str,
+        push_status: str,
         test_evidence_status: str,
         test_command: str,
         test_output: str,
@@ -307,6 +313,16 @@ class ChangeControlStore:
                         "patch_preview": patch_preview,
                         "local_branch_created": local_branch_created,
                         "local_branch_message": local_branch_message,
+                        "code_change_status": (
+                            code_change_status
+                            if code_change_status in {"not_started", "applied", "failed"}
+                            else "failed"
+                        ),
+                        "code_change_message": code_change_message,
+                        "sandbox_worktree_path": sandbox_worktree_path,
+                        "changed_files": changed_files,
+                        "commit_sha": commit_sha,
+                        "push_status": push_status,
                         "test_evidence_status": test_evidence_status,
                         "test_command": test_command,
                         "test_output": test_output,

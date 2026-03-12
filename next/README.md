@@ -36,6 +36,7 @@ This is not unrestricted autonomy. It is controlled automation with governance.
   - test evidence collection (`mock` or pytest)
   - issue-aware patch artifact generation
   - optional local git branch creation
+  - optional sandbox-git worktree code edits with guardrails
 - Dev execution and promotion workflow
 - Metrics API + visual dashboard
 - Offline triage evaluation harness
@@ -92,6 +93,7 @@ Modes and policy are environment-driven, so behavior can be changed without code
    - runs test evidence pipeline
    - writes patch artifact file
    - optionally creates local git branch reference
+   - optionally applies real file changes in sandbox git worktree
 7. Approver executes dev validation and records evidence.
 8. Approval decision applies policy gate.
 9. Release operator promotes to prod if eligible.
