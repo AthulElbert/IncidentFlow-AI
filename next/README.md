@@ -1,166 +1,140 @@
 ﻿# Agentic Production Support Platform - Detailed Guide
 
-## 1. What This Project Does
+## 1. Project Intent
 
-This project is an assistive, agentic production-support system for incident handling and safe release flow.
+This platform reduces production support toil by automating repetitive incident response steps while preserving human control on risky decisions.
 
-It takes incidents from APM-style inputs, analyzes them, prepares recovery actions, and drives controlled delivery with human approval gates.
+Target outcome:
 
-Core capabilities:
-- Monitor/ingest incident evidence (mock APM or HTTP APM adapter)
-- Classify issue type and detect patterns
-- Find similar historical incidents and previously successful solutions
-- Generate triage plus root-cause hypotheses (heuristic or LLM)
-- Create Jira ticket (mock or real)
-- Trigger Jenkins dev validation (mock or real)
-- Collect dev evidence and apply policy checks
-- Require human decision before production readiness
-- Trigger production deployment through Jenkins with audit metadata
-- Publish operational metrics summary for leadership visibility
-- Provide offline triage evaluation against labeled incidents
+- Faster triage and fix planning
+- Better reuse of historical incident knowledge
+- Safer release flow with explicit policy gates
+- Clear auditability for approvals and promotions
 
-## 2. Problem It Solves
+## 2. What Makes It Agentic
 
-Production teams often lose time in repetitive work:
-- triaging recurring incidents
-- searching old tickets/runbooks
-- manually coordinating Dev -> Approval -> Prod steps
-- proving fix quality before release
+The system behaves as an assistive agent loop:
 
-This platform reduces manual toil while keeping humans in control for risky decisions.
+- Observe: ingest APM-style incident signal
+- Diagnose: classify issue and infer probable cause
+- Ground: retrieve similar incidents and prior resolutions
+- Plan: generate fix actions + PR draft context
+- Act: trigger validation pipelines
+- Verify: collect dev evidence and evaluate policy
+- Escalate: require human decision for approval/promotion
 
-## 3. Agentic Behavior (What Is Autonomous vs Human-Controlled)
+This is not unrestricted autonomy. It is controlled automation with governance.
 
-Autonomous (assistive automation):
-- Incident analysis and classification
-- Pattern detection and similar-incident retrieval
-- Triage hypothesis generation
-- Ticket and dev-job orchestration
-- Draft PR generation with test evidence attachment
-- Local patch artifact generation and optional local git branch creation
-- Policy pre-check evaluation
+## 3. Capability Map
 
-Human-controlled:
-- Approval decision (`approve`/`reject`)
-- Promotion to production
+- Incident ingestion API (`mock` and custom events)
+- Heuristic + LLM triage with fallback safety
+- Jira and Jenkins integration via adapter abstraction
+- JSON/Postgres backend switch
+- PR preparation pipeline:
+  - draft PR metadata generation
+  - test evidence collection (`mock` or pytest)
+  - issue-aware patch artifact generation
+  - optional local git branch creation
+- Dev execution and promotion workflow
+- Metrics API + visual dashboard
+- Offline triage evaluation harness
 
-The design goal is safe autonomy: automate repetitive analysis and execution, but keep final release ownership with humans.
+## 4. Trust and Safety Design
 
-## 4. End-to-End Workflow
+Guardrails implemented:
 
-1. Incident is submitted to API (`/v1/incidents/process` or `/v1/incidents/mock`).
-2. Pipeline enriches incident with:
-   - issue classification
-   - recurrence/pattern signal
-   - similar incidents and prior solution context
-   - triage output (issue type, confidence, probable cause, hypothesis steps)
-3. Jira ticket is created.
-4. Change record is created with metadata and warnings.
-5. Dev validation is executed via Jenkins (`/v1/changes/{id}/execute-dev`).
-6. APM evidence validates outcome (improvement %, smoke test pass/fail).
-7. Human approver sets decision (`/v1/changes/{id}/decision`).
-8. Policy gate decides whether change is `ready_for_prod` or blocked.
-9. Release operator promotes via (`/v1/changes/{id}/promote`).
+- LLM output validation and confidence floor
+- Automatic heuristic fallback on malformed/failed LLM calls
+- Policy checks before prod readiness:
+  - min confidence
+  - warning constraints
+  - allowed Jenkins states
+  - unknown issue-type guard
+  - required dev evidence pass
+- RBAC with `viewer`, `approver`, `release_operator`
+- Structured audit data per change record
 
-## 5. Technical Architecture
+## 5. Architecture Decisions
 
-Main building blocks:
-- `FastAPI` API layer for incident/change operations
-- `Pipeline` orchestration service for end-to-end flow
-- Adapter abstraction for external systems:
-  - Jira adapter
-  - Jenkins adapter
-  - APM adapter
-  - LLM adapter (OpenAI-compatible)
-- Persistent storage backend:
-  - `json` (local files for MVP/dev)
-  - `postgres` (shared persistence for multi-instance deployment)
+### Adapter-first integrations
 
-Key implementation characteristics:
-- env-driven integration mode switching (`mock`/`real`)
-- env-driven storage switching (`STORAGE_BACKEND=json|postgres`)
-- graceful fallback to mock adapters on runtime integration failure
-- structured logs for traceability
-- role-based access control with API-key, JWT, or hybrid auth modes
+All external systems (Jira/Jenkins/APM/LLM/PR provider) use interfaces with mock and real implementations. This enables:
 
-## 6. Triage and Root-Cause Hypothesis Engine
+- local-first development
+- deterministic testing
+- runtime fallback resilience
 
-The triage engine supports two modes:
-- `heuristic`: deterministic local logic
-- `llm`: model-generated triage/hypotheses through OpenAI-compatible API
+### Config-driven behavior
 
-Behavioral safeguards:
-- strict response-shape validation
-- confidence floor enforcement
-- automatic fallback to heuristic on timeout/invalid output/errors
-- warning propagation for operator visibility
+Modes and policy are environment-driven, so behavior can be changed without code edits:
 
-This provides AI-assisted reasoning without sacrificing reliability.
+- integration mode
+- storage mode
+- triage mode
+- auth mode
+- policy thresholds
 
-## 7. Security and Governance
+### Storage evolution path
 
-Authentication:
-- API key mode
-- JWT mode
-- Hybrid mode
+- MVP starts with JSON files
+- Production path switches to Postgres with the same service interfaces
 
-Roles:
-- `viewer`: read/process incidents
-- `approver`: can run dev execution and approve/reject
-- `release_operator`: can promote to production
+## 6. End-to-End Runtime Flow
 
-Governance controls:
-- confidence threshold gate
-- warning-count gate (optional strict mode)
-- allowed Jenkins state checks
-- unknown issue-type guardrails
-- mandatory dev evidence status before production readiness
+1. Incident arrives (`/v1/incidents/process` or `/v1/incidents/mock`).
+2. Triage engine outputs issue type, confidence, probable cause, hypothesis steps.
+3. Pattern detector + knowledge base add recurrence and similar incidents.
+4. Jira ticket and Jenkins dev validation are initiated.
+5. Change record is persisted.
+6. Approver can call `prepare-pr`:
+   - creates draft PR metadata
+   - runs test evidence pipeline
+   - writes patch artifact file
+   - optionally creates local git branch reference
+7. Approver executes dev validation and records evidence.
+8. Approval decision applies policy gate.
+9. Release operator promotes to prod if eligible.
 
-## 8. API Surface (High Level)
+## 7. Interview Demo Strategy
 
-- `GET /health`
-- `POST /v1/incidents/mock`
-- `POST /v1/incidents/process`
-- `GET /v1/changes`
-- `GET /v1/changes/{change_id}`
-- `POST /v1/changes/{change_id}/execute-dev`
-- `POST /v1/changes/{change_id}/decision`
-- `POST /v1/changes/{change_id}/promote`
+Recommended flow:
 
-## 9. Current Scope vs Future Scope
+1. Show dashboard and metrics baseline.
+2. Create mock incident.
+3. Show triage metadata and change record.
+4. Run `prepare-pr` and open generated patch file.
+5. Execute dev validation and approval.
+6. Promote to prod.
+7. Show metrics changes and policy behavior.
 
-Current implemented scope:
-- Mock-first architecture with real-adapter readiness
-- LLM triage/hypothesis integration with fallback safety
-- Dev evidence + policy-gated production promotion flow
-- Metrics endpoint (`/v1/metrics/summary`) with quality and flow rates
-- Docker Compose setup for API + Postgres interview demo
-- Evaluation harness (`scripts/evaluate_triage.py`) with confusion matrix output
+Key message:
 
-Recommended next scope:
-- real Jira/Jenkins/APM integration hardening
-- PR creation automation (assistive, human-approved)
-- richer knowledge base from closed incidents
-- evaluation metrics dashboard (precision/recall, MTTR impact)
-- infrastructure remediation workflow (optional advanced phase)
+"Agentic automation with strong governance and measurable operational outcomes."
 
-## 10. How To Run
+## 8. Current Strengths
 
-1. Create and activate venv.
-2. Install requirements.
-3. Configure `.env` (start with `.env.example`).
-4. Start API using uvicorn.
-5. Run tests with pytest.
+- Clean separation of domain, adapters, and transport
+- Good test coverage for critical paths
+- Interview-friendly mock-first and real-integration-ready design
+- Visible outcomes through dashboard and metrics
 
-See root README for exact command examples and environment variables.
+## 9. Next Technical Upgrades
 
-## 11. Success Criteria for This Project
+High-value roadmap:
 
-A successful run should show:
-- incident processed with clear triage metadata
-- change record created with traceable evidence and warnings
-- dev execution evidence collected and policy gate evaluated
-- human decision recorded
-- production promotion only after policy + role checks pass
+1. Real PR branch/commit/push flow with safe repo sandboxing
+2. CI quality gate: benchmark regression blocker for triage models/prompts
+3. Reliability hardening: retries/circuit breakers/idempotency keys
+4. OTel tracing and SLO-based alerting for the agent itself
+5. Policy engine externalization (OPA-style rules)
 
-This establishes a practical foundation for an enterprise-grade agentic production support platform.
+## 10. Success Criteria
+
+The platform is successful when it consistently demonstrates:
+
+- lower manual triage effort
+- reproducible, auditable mitigation proposals
+- reduced unsafe production changes
+- transparent quality metrics for model and operations
+

@@ -1,149 +1,191 @@
-﻿# Production Support Agent MVP (Jira + Jenkins Ready)
+# Agentic Production Support Platform
 
-This project is an assistive production-support agent that:
+Assistive production-support system for incident triage, safe fix orchestration, approval governance, and controlled production promotion.
 
-1. Accepts APM-like alerts.
-2. Classifies the issue type.
-3. Detects recurring patterns.
-4. Finds similar past incidents and prior resolutions.
-5. Creates Jira tickets (mock or real).
-6. Triggers Jenkins dev validation (mock or real).
-7. Performs triage and root-cause hypothesis generation (heuristic or LLM).
-8. Collects APM evidence for dev-fix validation (mock or HTTP integration).
-9. Requires human approval and policy checks before prod readiness.
-10. Triggers Jenkins prod deploy with audited promotion metadata.
-11. Exposes interview-ready operational metrics via `/v1/metrics/summary`.
-12. Includes offline triage evaluation harness for quality scoring.
-13. Prepares draft PRs with test evidence for human review before deploy.
+## What It Does
 
-## Tech Stack
+- Ingests incidents (`/v1/incidents/process` or `/v1/incidents/mock`)
+- Classifies issue type and detects recurring patterns
+- Finds similar incidents and prior resolution context
+- Generates triage + root-cause hypotheses (heuristic or LLM)
+- Creates Jira ticket (mock or real)
+- Prepares draft PR metadata with test evidence
+- Generates issue-aware patch artifact files
+- Optionally creates local git branch refs for PR flow
+- Executes dev validation via Jenkins + APM evidence
+- Enforces human approval and policy gates before prod
+- Promotes to production via Jenkins with audit metadata
+- Exposes metrics API and dashboard UI
 
-- Python 3.10+
-- FastAPI
-- Pydantic
-- python-dotenv
-- PyJWT
-- psycopg (optional, for Postgres storage backend)
-- Env-driven adapters for Jira, Jenkins, APM, and LLM triage
+## Current Architecture
+
+- API and orchestration: FastAPI
+- Domain/services: classifier, triage agent, fix planner, pipeline, change control, PR preparer
+- Adapters: Jira, Jenkins, APM, LLM, PR provider
+- Storage backend:
+  - `json` (default MVP/local)
+  - `postgres` (shared persistence)
+- Auth/RBAC:
+  - `api_key` | `jwt` | `hybrid`
+  - roles: `viewer`, `approver`, `release_operator`
 
 ## Project Structure
 
 ```text
-src/app/main.py                         # API entrypoint + RBAC enforcement
-src/app/config.py                       # Env settings + .env loading
-src/app/security.py                     # API-key/JWT auth + role checks
-src/app/logging_config.py               # JSON structured logging
-src/app/models/schemas.py               # Request/response models
-src/app/services/classifier.py          # Heuristic fallback classifier
-src/app/services/pattern_detector.py
-src/app/services/knowledge_base.py      # Similar incident lookup (JSON or Postgres)
-src/app/services/triage_agent.py        # LLM/heuristic triage + hypothesis generation
-src/app/services/fix_planner.py         # Runbook/config action suggestions
-src/app/services/integration_factory.py # Selects mock vs real adapters
-src/app/services/pipeline.py            # End-to-end orchestration + fallbacks
-src/app/services/dev_fix_executor.py    # Jenkins + APM evidence based dev validation
-src/app/services/change_control.py      # Approval gate + policy checks (JSON or Postgres)
-src/app/services/pr_preparer.py         # Draft PR generation + test evidence collection
-src/app/adapters/pr_client.py           # PR adapters (mock + GitHub-ready)
-src/app/adapters/jira_client.py         # Jira adapters
-src/app/adapters/jenkins_client.py      # Jenkins adapters (dev + prod)
-src/app/adapters/apm_client.py          # APM evidence adapters (mock + http)
-src/app/adapters/llm_client.py          # OpenAI-compatible LLM triage adapter
-data/incident_history.json              # Seeded incident history
-data/change_records.json                # Change approval records
-eval/triage_dataset.jsonl               # Labeled dataset for triage evaluation
-scripts/evaluate_triage.py              # Offline scoring harness
-docker-compose.yml                      # One-command API + Postgres demo
+src/app/main.py                         # FastAPI entrypoint + route wiring
+src/app/config.py                       # Environment settings loading
+src/app/security.py                     # API key / JWT auth + RBAC
+src/app/models/schemas.py               # Request/response and domain schemas
+src/app/services/pipeline.py            # Incident processing orchestration
+src/app/services/change_control.py      # Approval/policy state machine + persistence
+src/app/services/triage_agent.py        # Heuristic/LLM triage + hypothesis
+src/app/services/pr_preparer.py         # Draft PR prep + test evidence + patch artifact
+src/app/services/metrics.py             # Operational metrics summary builder
+src/app/adapters/*.py                   # External integration adapters
+frontend/dashboard.html                 # Demo dashboard UI
+eval/triage_dataset.jsonl               # Labeled evaluation dataset
+scripts/evaluate_triage.py              # Offline triage evaluation harness
+data/*.json                             # JSON storage files (when STORAGE_BACKEND=json)
+docker-compose.yml                      # API + Postgres local demo
 ```
+
+## Prerequisites
+
+- Python 3.10+
+- Optional: Docker Desktop (for compose demo)
 
 ## Setup
 
-```bash
+```powershell
 cd C:\Personal_projects\Agentic_AI_Projects
 python -m venv .venv
-.\.venv\Scripts\activate
+```
+
+If PowerShell blocks activation, either:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
+```
+
+or run without activation:
+
+```powershell
+& "C:\Personal_projects\Agentic_AI_Projects\.venv\Scripts\python.exe" -m pip install -r requirements.txt
+```
+
+Install dependencies:
+
+```powershell
 pip install -r requirements.txt
 ```
 
 ## Configuration
 
-1. Copy `.env.example` to `.env`.
-2. Fill values for your environment.
-3. `main.py` auto-loads `.env` at startup.
+1. Copy `.env.example` to `.env`
+2. Set keys/modes for your environment
 
-Policy settings:
-- `MIN_CONFIDENCE_FOR_PROD`
-- `REQUIRE_ZERO_WARNINGS_FOR_PROD`
-- `ALLOWED_JENKINS_STATES_FOR_PROD`
+Key settings groups:
 
-Storage settings:
-- `STORAGE_BACKEND`: `json` | `postgres`
-- `DATABASE_URL` (required when `STORAGE_BACKEND=postgres`)
-
-PR settings:
-- `PR_MODE`: `mock` | `github`
-- `PR_REPO_SLUG`, `PR_GITHUB_TOKEN`, `PR_GITHUB_API_BASE_URL`, `PR_BASE_BRANCH`
-- `PR_LOCAL_BRANCH_MODE`: `spec` | `git` (create local git branch ref)
-- `PR_PATCH_OUTPUT_DIR`: where generated patch artifacts are written
-
-Test evidence settings:
-- `TEST_EVIDENCE_MODE`: `mock` | `pytest`
-- `TEST_EVIDENCE_COMMAND`
-- `TEST_EVIDENCE_TIMEOUT_SECONDS`
-
-Triage settings:
-- `TRIAGE_MODE`: `heuristic` | `llm`
-- `TRIAGE_CONFIDENCE_FLOOR`
-- `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, `LLM_TIMEOUT_SECONDS`, `LLM_VERIFY_SSL`
-
-Dev evidence settings:
-- `APM_MODE`: `mock` | `http`
-- `APM_BASE_URL`, `APM_TIMEOUT_SECONDS`, `APM_VERIFY_SSL`
-- `DEV_MIN_APM_IMPROVEMENT_PCT`
-- `REQUIRE_DEV_SMOKE_TESTS`
-
-Auth settings:
-- `AUTH_ENABLED`
-- `AUTH_MODE`: `api_key` | `jwt` | `hybrid`
-- API keys: `VIEWER_API_KEY`, `APPROVER_API_KEY`, `RELEASE_OPERATOR_API_KEY`
-- JWT: `JWT_SECRET`, `JWT_ALGORITHM`, `JWT_ISSUER`, `JWT_AUDIENCE`, `JWT_ROLE_CLAIM`, `JWT_ACTOR_CLAIM`
+- Storage:
+  - `STORAGE_BACKEND`: `json` | `postgres`
+  - `DATABASE_URL` (required for postgres)
+- PR pipeline:
+  - `PR_MODE`: `mock` | `github`
+  - `PR_REPO_SLUG`, `PR_GITHUB_TOKEN`, `PR_GITHUB_API_BASE_URL`, `PR_BASE_BRANCH`
+  - `PR_LOCAL_BRANCH_MODE`: `spec` | `git`
+  - `PR_PATCH_OUTPUT_DIR`
+- Test evidence:
+  - `TEST_EVIDENCE_MODE`: `mock` | `pytest`
+  - `TEST_EVIDENCE_COMMAND`
+  - `TEST_EVIDENCE_TIMEOUT_SECONDS`
+- Triage:
+  - `TRIAGE_MODE`: `heuristic` | `llm`
+  - `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`
+- Integrations:
+  - `JIRA_MODE`, `JENKINS_MODE`, `APM_MODE`
+- Policy:
+  - `MIN_CONFIDENCE_FOR_PROD`
+  - `REQUIRE_ZERO_WARNINGS_FOR_PROD`
+  - `ALLOWED_JENKINS_STATES_FOR_PROD`
+- Auth:
+  - `AUTH_MODE`: `api_key` | `jwt` | `hybrid`
+  - API keys or JWT settings
 
 ## Run API
-
-PowerShell:
 
 ```powershell
 $env:PYTHONPATH = "C:\Personal_projects\Agentic_AI_Projects\src"
 & "C:\Personal_projects\Agentic_AI_Projects\.venv\Scripts\python.exe" -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-API docs:
-- http://127.0.0.1:8000/docs
-- Dashboard UI:
-  - http://127.0.0.1:8000/dashboard
+Open:
 
-## Run Tests
+- Swagger: `http://127.0.0.1:8000/docs`
+- Dashboard: `http://127.0.0.1:8000/dashboard`
 
-```powershell
-$env:PYTHONPATH = "C:\Personal_projects\Agentic_AI_Projects\src"
-& "C:\Personal_projects\Agentic_AI_Projects\.venv\Scripts\python.exe" -m pytest -q tests
-```
+## Key Endpoints
 
-## Evaluate Triage Quality (Offline)
+- `GET /health`
+- `POST /v1/incidents/mock`
+- `POST /v1/incidents/process`
+- `GET /v1/changes`
+- `GET /v1/changes/{change_id}`
+- `GET /v1/metrics/summary`
+- `POST /v1/changes/{change_id}/prepare-pr`
+- `POST /v1/changes/{change_id}/execute-dev`
+- `POST /v1/changes/{change_id}/decision`
+- `POST /v1/changes/{change_id}/promote`
+
+## Typical Workflow
+
+1. Create/process incident
+2. Capture `metadata.change_id`
+3. Review change record
+4. Prepare PR (`prepare-pr`)
+5. Validate generated patch file under `PR_PATCH_OUTPUT_DIR`
+6. Execute dev validation
+7. Approve or reject
+8. Promote to production (release operator)
+
+Notes:
+
+- `prepare-pr` generates issue-aware patch templates:
+  - `performance_degradation`
+  - `application_error`
+  - `dependency_failure`
+  - `resource_saturation`
+  - `unknown` (manual triage template)
+- If `PR_LOCAL_BRANCH_MODE=git`, service attempts `git branch <generated-branch>`
+
+## Dashboard Demo
+
+`/dashboard` supports:
+
+- API key input
+- Metrics refresh
+- Mock incident generation
+- `prepare-pr` trigger by `change_id`
+
+## Triage Evaluation Harness
+
+Run heuristic benchmark:
 
 ```powershell
 $env:PYTHONPATH = "C:\Personal_projects\Agentic_AI_Projects\src"
 & "C:\Personal_projects\Agentic_AI_Projects\.venv\Scripts\python.exe" scripts\evaluate_triage.py --mode heuristic
 ```
 
-Output report:
+Output:
+
 - `eval/triage_eval_report.json`
 
-For LLM mode:
-- set `LLM_API_KEY` (and optional `LLM_BASE_URL`, `LLM_MODEL`)
+LLM mode:
+
+- set `LLM_API_KEY`
 - run `scripts/evaluate_triage.py --mode llm`
 
-## Docker Demo (API + Postgres)
+## Docker Compose Demo (API + Postgres)
 
 ```powershell
 cd C:\Personal_projects\Agentic_AI_Projects
@@ -151,115 +193,20 @@ docker compose up --build
 ```
 
 Services:
+
 - API: `http://127.0.0.1:8000`
 - Postgres: `localhost:5432`
 
-The compose profile runs with:
-- `STORAGE_BACKEND=postgres`
-- `DATABASE_URL=postgresql://postgres:postgres@postgres:5432/agentic_support`
+## Testing
 
-## APM HTTP Evidence Contract
-
-When `APM_MODE=http`, app calls:
-
-- `GET {APM_BASE_URL}/v1/evidence?service=<>&change_id=<>&issue_type=<>`
-
-Expected JSON response:
-
-```json
-{
-  "apm_improvement_pct": 8.5,
-  "smoke_tests_passed": true,
-  "notes": "latency dropped after config update"
-}
+```powershell
+$env:PYTHONPATH = "C:\Personal_projects\Agentic_AI_Projects\src"
+& "C:\Personal_projects\Agentic_AI_Projects\.venv\Scripts\python.exe" -m pytest -q tests
 ```
 
-## RBAC Model
+## Safety and Governance
 
-Role permissions:
-- `viewer`: read endpoints + incident ingestion
-- `approver`: viewer permissions + execute dev + approval decision
-- `release_operator`: approver permissions + promotion
-
-## Authentication Modes
-
-1. `api_key`
-- Send header: `X-API-Key: <key>`
-
-2. `jwt`
-- Send header: `Authorization: Bearer <token>`
-- Token must include role and actor claims (configurable by `JWT_ROLE_CLAIM` and `JWT_ACTOR_CLAIM`).
-
-3. `hybrid`
-- Accepts JWT bearer token or API key.
-- If bearer token is present, it is validated first.
-
-## Endpoints
-
-- `GET /health` (viewer+)
-- `POST /v1/incidents/mock` (viewer+)
-- `POST /v1/incidents/process` (viewer+)
-- `GET /v1/changes` (viewer+)
-- `GET /v1/changes/{change_id}` (viewer+)
-- `GET /v1/metrics/summary` (viewer+)
-- `POST /v1/changes/{change_id}/prepare-pr` (approver+)
-- `POST /v1/changes/{change_id}/execute-dev` (approver+)
-- `POST /v1/changes/{change_id}/decision` (approver+)
-- `POST /v1/changes/{change_id}/promote` (release_operator)
-- `GET /dashboard` (demo web UI)
-
-## Typical Flow
-
-1. Process incident using `/v1/incidents/process` or `/v1/incidents/mock` (triage + root-cause hypothesis generated).
-2. Read `metadata.change_id` from response.
-3. Review change using `GET /v1/changes/{change_id}`.
-4. Prepare draft PR and test evidence with `POST /v1/changes/{change_id}/prepare-pr`.
-5. This step generates a patch artifact file in `PR_PATCH_OUTPUT_DIR` (for example `generated_patches/CHG-XXXX.patch`) and optionally creates a local git branch when `PR_LOCAL_BRANCH_MODE=git`.
-6. Patch artifact content is issue-aware (performance/error/dependency/resource/unknown templates).
-7. Execute dev fix with `POST /v1/changes/{change_id}/execute-dev`.
-8. Approve/reject using `POST /v1/changes/{change_id}/decision`.
-9. If `deployment_state=ready_for_prod`, promote using `POST /v1/changes/{change_id}/promote`.
-10. Promotion triggers Jenkins prod job and stores queue/build URL + result.
-
-## Policy Gate Behavior
-
-When a change is approved, policy checks run before marking it ready for production:
-- confidence must meet minimum threshold
-- warnings must be zero (if configured)
-- Jenkins status must be in allowed states
-- unknown issue type is blocked for manual deep-dive
-- dev execution evidence must be in `passed` state
-
-Decision outcomes:
-- `approved + ready_for_prod` (policy passed)
-- `approved + blocked_by_policy` (approved by human but blocked for final rollout)
-- `rejected + closed_rejected`
-
-Promotion outcomes:
-- `promoted_to_prod` when Jenkins prod trigger is queued/success
-- `prod_promotion_failed` when Jenkins prod trigger returns non-success state
-
-## Structured Logging
-
-- Logs are emitted as JSON lines.
-- Set `LOG_LEVEL` in `.env` (`DEBUG`, `INFO`, `WARNING`, `ERROR`).
-- Pipeline logs include incident ingestion, fallback usage, and processing completion.
-
-## Enabling Real Jira + Jenkins
-
-1. Set `JIRA_MODE=real` and `JENKINS_MODE=real`.
-2. Fill required Jira/Jenkins credentials in `.env`.
-3. Start the API and call `/v1/incidents/mock`.
-
-Notes:
-- If real integration fails at runtime, pipeline auto-falls back to mock and includes warnings in `metadata.warnings`.
-- `/health` shows active startup modes, including `triage_mode`, `apm_mode`, `storage_backend`, and auth source (`api_key` or `jwt`).
-
-## Assistive Behavior
-
-- Agent suggests and prepares actions.
-- Human approval is required.
-- Policy checks enforce safe promotion criteria before `ready_for_prod`.
-- Promotion is role-protected and audited.
-
-
+- Assistive autonomy, human-controlled release decisions
+- Policy gate before `ready_for_prod`
+- Role-protected production promotion
+- Structured audit fields in change records
