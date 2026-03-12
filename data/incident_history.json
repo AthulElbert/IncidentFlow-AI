@@ -191,5 +191,131 @@
       "Temporarily increase upstream timeout by 10-15% in dev config."
     ],
     "created_at": "2026-03-04T18:40:26.023460Z"
+  },
+  {
+    "incident_id": "INC-DF1AEB21",
+    "service": "payments-service",
+    "metric": "latency_p99_ms",
+    "issue_type": "performance_degradation",
+    "summary": "[New] payments-service - performance_degradation in prod",
+    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
+    "runbook_actions": [
+      "Check p95/p99 latency breakdown by endpoint in APM.",
+      "Scale service replicas by +1 in dev and verify latency trend.",
+      "Temporarily increase upstream timeout by 10-15% in dev config."
+    ],
+    "created_at": "2026-03-12T17:45:33.531485Z"
+  },
+  {
+    "incident_id": "INC-123E4FF2",
+    "service": "payments-service",
+    "metric": "latency_p99_ms",
+    "issue_type": "performance_degradation",
+    "summary": "[New] payments-service - performance_degradation in prod",
+    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
+    "runbook_actions": [
+      "Check p95/p99 latency breakdown by endpoint in APM.",
+      "Scale service replicas by +1 in dev and verify latency trend.",
+      "Temporarily increase upstream timeout by 10-15% in dev config."
+    ],
+    "created_at": "2026-03-12T17:45:33.946933Z"
+  },
+  {
+    "incident_id": "INC-FE5A9133",
+    "service": "payments-service",
+    "metric": "latency_p99_ms",
+    "issue_type": "performance_degradation",
+    "summary": "[Recurring] payments-service - performance_degradation in prod",
+    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
+    "runbook_actions": [
+      "Check p95/p99 latency breakdown by endpoint in APM.",
+      "Scale service replicas by +1 in dev and verify latency trend.",
+      "Temporarily increase upstream timeout by 10-15% in dev config."
+    ],
+    "created_at": "2026-03-12T17:45:34.391206Z"
+  },
+  {
+    "incident_id": "INC-0CA7B769",
+    "service": "payments-service",
+    "metric": "latency_p99_ms",
+    "issue_type": "performance_degradation",
+    "summary": "[Recurring] payments-service - performance_degradation in prod",
+    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
+    "runbook_actions": [
+      "Check p95/p99 latency breakdown by endpoint in APM.",
+      "Scale service replicas by +1 in dev and verify latency trend.",
+      "Temporarily increase upstream timeout by 10-15% in dev config."
+    ],
+    "created_at": "2026-03-12T17:45:35.451333Z"
+  },
+  {
+    "incident_id": "INC-DF3834BF",
+    "service": "payments-service",
+    "metric": "latency_p99_ms",
+    "issue_type": "performance_degradation",
+    "summary": "[Recurring] payments-service - performance_degradation in prod",
+    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
+    "runbook_actions": [
+      "Check p95/p99 latency breakdown by endpoint in APM.",
+      "Scale service replicas by +1 in dev and verify latency trend.",
+      "Temporarily increase upstream timeout by 10-15% in dev config."
+    ],
+    "created_at": "2026-03-12T17:45:36.445241Z"
+  },
+  {
+    "incident_id": "INC-90811A15",
+    "service": "payments-service",
+    "metric": "latency_p99_ms",
+    "issue_type": "performance_degradation",
+    "summary": "[Recurring] payments-service - performance_degradation in prod",
+    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
+    "runbook_actions": [
+      "Check p95/p99 latency breakdown by endpoint in APM.",
+      "Scale service replicas by +1 in dev and verify latency trend.",
+      "Temporarily increase upstream timeout by 10-15% in dev config."
+    ],
+    "created_at": "2026-03-12T17:45:36.932421Z"
+  },
+  {
+    "incident_id": "INC-B32B4178",
+    "service": "payments-service",
+    "metric": "latency_p99_ms",
+    "issue_type": "performance_degradation",
+    "summary": "[Recurring] payments-service - performance_degradation in prod",
+    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
+    "runbook_actions": [
+      "Check p95/p99 latency breakdown by endpoint in APM.",
+      "Scale service replicas by +1 in dev and verify latency trend.",
+      "Temporarily increase upstream timeout by 10-15% in dev config."
+    ],
+    "created_at": "2026-03-12T17:45:37.290617Z"
+  },
+  {
+    "incident_id": "INC-0561C56A",
+    "service": "payments-service",
+    "metric": "latency_p99_ms",
+    "issue_type": "performance_degradation",
+    "summary": "[New] payments-service - performance_degradation in prod",
+    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
+    "runbook_actions": [
+      "Check p95/p99 latency breakdown by endpoint in APM.",
+      "Scale service replicas by +1 in dev and verify latency trend.",
+      "Temporarily increase upstream timeout by 10-15% in dev config."
+    ],
+    "created_at": "2026-03-12T18:06:23.803103Z"
+  },
+  {
+    "incident_id": "INC-42C402EC",
+    "service": "payments-service",
+    "metric": "latency_p99_ms",
+    "issue_type": "performance_degradation",
+    "summary": "[New] payments-service - performance_degradation in prod",
+    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
+    "runbook_actions": [
+      "Check p95/p99 latency breakdown by endpoint in APM.",
+      "Scale service replicas by +1 in dev and verify latency trend.",
+      "Temporarily increase upstream timeout by 10-15% in dev config."
+    ],
+    "created_at": "2026-03-12T18:10:37.108722Z"
   }
 ]

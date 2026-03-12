@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agentic Support Dashboard</title>
+  <style>
+    :root {
+      --bg: #f3f6f3;
+      --panel: #ffffff;
+      --ink: #0f172a;
+      --muted: #475569;
+      --line: #d9e2d9;
+      --accent: #0f766e;
+      --accent-2: #1d4ed8;
+      --warn: #b45309;
+      --bad: #b91c1c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Helvetica Neue", sans-serif;
+      background: radial-gradient(circle at top right, #d8f2ec 0%, var(--bg) 45%, #eef3ff 100%);
+      color: var(--ink);
+    }
+    .wrap {
+      max-width: 1100px;
+      margin: 24px auto 40px;
+      padding: 0 16px;
+    }
+    .header {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 1.4rem;
+      letter-spacing: 0.2px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
+      margin-bottom: 14px;
+    }
+    .controls {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 8px;
+      align-items: center;
+    }
+    input {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px 11px;
+      font-size: 0.95rem;
+      color: var(--ink);
+    }
+    button {
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 12px;
+      color: white;
+      background: var(--accent);
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button.secondary {
+      background: var(--accent-2);
+    }
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+    .status {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .kpi {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px;
+      background: linear-gradient(180deg, #ffffff, #fbfefc);
+    }
+    .kpi .label {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-bottom: 5px;
+    }
+    .kpi .value {
+      font-size: 1.2rem;
+      font-weight: 700;
+    }
+    .kpi.warn .value { color: var(--warn); }
+    .kpi.bad .value { color: var(--bad); }
+    .bars {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .bar-group h3 {
+      font-size: 0.95rem;
+      margin: 0 0 8px;
+    }
+    .bar-row {
+      margin: 8px 0;
+    }
+    .bar-meta {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.82rem;
+      color: var(--muted);
+      margin-bottom: 4px;
+    }
+    .bar {
+      height: 9px;
+      width: 100%;
+      background: #ebeff4;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .bar > span {
+      display: block;
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    }
+    @media (max-width: 860px) {
+      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .bars { grid-template-columns: 1fr; }
+      .controls { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <h1>Agentic Production Support Dashboard</h1>
+    </div>
+
+    <div class="panel">
+      <div class="controls">
+        <input id="apiKey" type="password" placeholder="X-API-Key (viewer/approver/release key)">
+        <button id="refreshBtn">Refresh Metrics</button>
+        <button id="mockBtn" class="secondary">Create Mock Incident</button>
+      </div>
+      <div class="controls" style="margin-top:8px;">
+        <input id="changeId" type="text" placeholder="Change ID for PR prep (e.g., CHG-AB12CD34)">
+        <button id="preparePrBtn">Prepare Draft PR</button>
+        <button id="copyLastBtn" class="secondary">Use Last Change</button>
+      </div>
+      <div id="status" class="status">Enter API key and click Refresh Metrics.</div>
+    </div>
+
+    <div class="panel">
+      <div class="grid">
+        <div class="kpi"><div class="label">Total Changes</div><div id="k-total" class="value">0</div></div>
+        <div class="kpi"><div class="label">Avg Confidence</div><div id="k-conf" class="value">0.00</div></div>
+        <div class="kpi warn"><div class="label">Policy Block Rate</div><div id="k-block" class="value">0%</div></div>
+        <div class="kpi bad"><div class="label">Warning Rate</div><div id="k-warn" class="value">0%</div></div>
+        <div class="kpi"><div class="label">Dev Success Rate</div><div id="k-dev" class="value">0%</div></div>
+        <div class="kpi"><div class="label">Promotion Success Rate</div><div id="k-prod" class="value">0%</div></div>
+        <div class="kpi"><div class="label">Avg Time To Dev</div><div id="k-tdev" class="value">0s</div></div>
+        <div class="kpi"><div class="label">Avg Time To Prod</div><div id="k-tprod" class="value">0s</div></div>
+      </div>
+    </div>
+
+    <div class="panel bars">
+      <div class="bar-group">
+        <h3>Issue Type Distribution</h3>
+        <div id="issueBars"></div>
+      </div>
+      <div class="bar-group">
+        <h3>Deployment State Distribution</h3>
+        <div id="stateBars"></div>
+      </div>
+      <div class="bar-group">
+        <h3>Status Distribution</h3>
+        <div id="statusBars"></div>
+      </div>
+      <div class="bar-group">
+        <h3>Triage Mode Distribution</h3>
+        <div id="triageBars"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const statusEl = document.getElementById("status");
+    const apiKeyEl = document.getElementById("apiKey");
+    const refreshBtn = document.getElementById("refreshBtn");
+    const mockBtn = document.getElementById("mockBtn");
+    const preparePrBtn = document.getElementById("preparePrBtn");
+    const copyLastBtn = document.getElementById("copyLastBtn");
+    const changeIdEl = document.getElementById("changeId");
+    let lastChangeId = "";
+
+    function setStatus(text) {
+      statusEl.textContent = text;
+    }
+
+    function asPct(v) {
+      return `${(Number(v || 0) * 100).toFixed(1)}%`;
+    }
+
+    function asSec(v) {
+      return `${Math.round(Number(v || 0))}s`;
+    }
+
+    function setKpi(id, value) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = value;
+    }
+
+    function renderBars(containerId, data, total) {
+      const root = document.getElementById(containerId);
+      root.innerHTML = "";
+      const entries = Object.entries(data || {});
+      if (!entries.length) {
+        root.textContent = "No data";
+        return;
+      }
+
+      for (const [label, count] of entries.sort((a, b) => b[1] - a[1])) {
+        const pct = total > 0 ? (count / total) * 100 : 0;
+        const row = document.createElement("div");
+        row.className = "bar-row";
+        row.innerHTML = `
+          <div class="bar-meta"><span>${label}</span><span>${count} (${pct.toFixed(1)}%)</span></div>
+          <div class="bar"><span style="width:${pct}%"></span></div>
+        `;
+        root.appendChild(row);
+      }
+    }
+
+    function headers() {
+      const key = apiKeyEl.value.trim();
+      if (!key) return {"Content-Type": "application/json"};
+      return {"Content-Type": "application/json", "X-API-Key": key};
+    }
+
+    async function loadMetrics() {
+      refreshBtn.disabled = true;
+      setStatus("Loading metrics...");
+      try {
+        const res = await fetch("/v1/metrics/summary", {
+          method: "GET",
+          headers: headers(),
+        });
+        if (!res.ok) {
+          const t = await res.text();
+          throw new Error(`metrics request failed: ${res.status} ${t}`);
+        }
+        const m = await res.json();
+        setKpi("k-total", String(m.total_changes ?? 0));
+        setKpi("k-conf", Number(m.avg_confidence ?? 0).toFixed(2));
+        setKpi("k-block", asPct(m.policy_block_rate));
+        setKpi("k-warn", asPct(m.warning_rate));
+        setKpi("k-dev", asPct(m.dev_success_rate));
+        setKpi("k-prod", asPct(m.promotion_success_rate));
+        setKpi("k-tdev", asSec(m.avg_time_to_dev_seconds));
+        setKpi("k-tprod", asSec(m.avg_time_to_prod_seconds));
+
+        const total = Number(m.total_changes || 0);
+        renderBars("issueBars", m.issue_type_counts, total);
+        renderBars("stateBars", m.deployment_state_counts, total);
+        renderBars("statusBars", m.status_counts, total);
+        renderBars("triageBars", m.triage_mode_counts, total);
+        setStatus(`Metrics refreshed at ${new Date().toLocaleTimeString()}.`);
+      } catch (err) {
+        setStatus(String(err));
+      } finally {
+        refreshBtn.disabled = false;
+      }
+    }
+
+    async function createMockIncident() {
+      mockBtn.disabled = true;
+      setStatus("Creating mock incident...");
+      try {
+        const res = await fetch("/v1/incidents/mock", {
+          method: "POST",
+          headers: headers(),
+        });
+        if (!res.ok) {
+          const t = await res.text();
+          throw new Error(`mock incident failed: ${res.status} ${t}`);
+        }
+        const body = await res.json();
+        const changeId = body?.metadata?.change_id || "n/a";
+        lastChangeId = changeId;
+        setStatus(`Mock incident created. change_id=${changeId}`);
+        await loadMetrics();
+      } catch (err) {
+        setStatus(String(err));
+      } finally {
+        mockBtn.disabled = false;
+      }
+    }
+
+    async function prepareDraftPr() {
+      const changeId = changeIdEl.value.trim();
+      if (!changeId) {
+        setStatus("Enter a change ID first.");
+        return;
+      }
+      preparePrBtn.disabled = true;
+      setStatus(`Preparing draft PR for ${changeId}...`);
+      try {
+        const res = await fetch(`/v1/changes/${encodeURIComponent(changeId)}/prepare-pr`, {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify({comment: "Prepared from dashboard demo"}),
+        });
+        if (!res.ok) {
+          const t = await res.text();
+          throw new Error(`prepare-pr failed: ${res.status} ${t}`);
+        }
+        const body = await res.json();
+        setStatus(`Draft PR ready: ${body.pr_url} | tests=${body.test_evidence_status}`);
+      } catch (err) {
+        setStatus(String(err));
+      } finally {
+        preparePrBtn.disabled = false;
+      }
+    }
+
+    function useLastChangeId() {
+      if (!lastChangeId) {
+        setStatus("No mock incident created yet.");
+        return;
+      }
+      changeIdEl.value = lastChangeId;
+      setStatus(`Using last change ID: ${lastChangeId}`);
+    }
+
+    refreshBtn.addEventListener("click", loadMetrics);
+    mockBtn.addEventListener("click", createMockIncident);
+    preparePrBtn.addEventListener("click", prepareDraftPr);
+    copyLastBtn.addEventListener("click", useLastChangeId);
+  </script>
+</body>
+</html>

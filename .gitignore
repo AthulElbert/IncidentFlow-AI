@@ -2,3 +2,5 @@
 __pycache__/
 *.pyc
 .env
+eval/triage_eval_report.json
+generated_patches/

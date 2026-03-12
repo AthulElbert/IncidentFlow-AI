@@ -16,6 +16,8 @@ Core capabilities:
 - Collect dev evidence and apply policy checks
 - Require human decision before production readiness
 - Trigger production deployment through Jenkins with audit metadata
+- Publish operational metrics summary for leadership visibility
+- Provide offline triage evaluation against labeled incidents
 
 ## 2. Problem It Solves
 
@@ -34,6 +36,8 @@ Autonomous (assistive automation):
 - Pattern detection and similar-incident retrieval
 - Triage hypothesis generation
 - Ticket and dev-job orchestration
+- Draft PR generation with test evidence attachment
+- Local patch artifact generation and optional local git branch creation
 - Policy pre-check evaluation
 
 Human-controlled:
@@ -129,6 +133,9 @@ Current implemented scope:
 - Mock-first architecture with real-adapter readiness
 - LLM triage/hypothesis integration with fallback safety
 - Dev evidence + policy-gated production promotion flow
+- Metrics endpoint (`/v1/metrics/summary`) with quality and flow rates
+- Docker Compose setup for API + Postgres interview demo
+- Evaluation harness (`scripts/evaluate_triage.py`) with confusion matrix output
 
 Recommended next scope:
 - real Jira/Jenkins/APM integration hardening

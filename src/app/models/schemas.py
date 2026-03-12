@@ -39,6 +39,13 @@ class JenkinsBuildResult(BaseModel):
     url: str
 
 
+class PullRequestDraft(BaseModel):
+    title: str
+    branch: str
+    url: str
+    status: str = "DRAFT"
+
+
 class SimilarIncident(BaseModel):
     incident_id: str
     score: float
@@ -61,6 +68,22 @@ class ChangeRecord(BaseModel):
     confidence: float = 0.0
     warning_count: int = 0
     jenkins_status: str = "UNKNOWN"
+    pr_status: Literal["not_started", "draft_created", "failed"] = "not_started"
+    pr_url: str | None = None
+    pr_branch: str | None = None
+    pr_title: str | None = None
+    pr_summary: str | None = None
+    pr_generated_at: datetime | None = None
+    pr_generated_by: str | None = None
+    patch_artifact_path: str | None = None
+    patch_preview: str | None = None
+    local_branch_created: bool = False
+    local_branch_message: str | None = None
+    test_evidence_status: Literal["not_run", "passed", "failed"] = "not_run"
+    test_command: str | None = None
+    test_output: str | None = None
+    test_pass_rate: float | None = None
+    test_run_at: datetime | None = None
     dev_execution_status: Literal["not_started", "in_progress", "passed", "failed"] = "not_started"
     dev_execution_url: str | None = None
     dev_apm_improvement_pct: float | None = None
@@ -117,6 +140,23 @@ class DevExecuteResponse(BaseModel):
     validation_passed: bool
 
 
+class PRPrepareRequest(BaseModel):
+    comment: str = ""
+
+
+class PRPrepareResponse(BaseModel):
+    change_id: str
+    pr_status: str
+    pr_url: str
+    pr_branch: str
+    local_branch_created: bool
+    local_branch_message: str
+    patch_artifact_path: str
+    test_evidence_status: str
+    test_command: str
+    test_pass_rate: float
+
+
 class PromoteRequest(BaseModel):
     comment: str = ""
 
@@ -141,3 +181,20 @@ class IncidentResponse(BaseModel):
     jira_ticket: JiraTicket
     jenkins_validation: JenkinsBuildResult
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class MetricsSummary(BaseModel):
+    total_changes: int
+    status_counts: dict[str, int] = Field(default_factory=dict)
+    deployment_state_counts: dict[str, int] = Field(default_factory=dict)
+    issue_type_counts: dict[str, int] = Field(default_factory=dict)
+    triage_mode_counts: dict[str, int] = Field(default_factory=dict)
+    warning_count_total: int
+    warning_rate: float
+    policy_block_rate: float
+    avg_confidence: float
+    low_confidence_count: int
+    dev_success_rate: float
+    promotion_success_rate: float
+    avg_time_to_dev_seconds: float
+    avg_time_to_prod_seconds: float

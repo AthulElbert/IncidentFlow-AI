@@ -1,0 +1,38 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: agentic-postgres
+    environment:
+      POSTGRES_DB: agentic_support
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agentic-api
+    depends_on:
+      - postgres
+    environment:
+      STORAGE_BACKEND: postgres
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/agentic_support
+      AUTH_ENABLED: "true"
+      AUTH_MODE: api_key
+      VIEWER_API_KEY: viewer-local-key
+      APPROVER_API_KEY: approver-local-key
+      RELEASE_OPERATOR_API_KEY: release-local-key
+      LOG_LEVEL: INFO
+      JIRA_MODE: mock
+      JENKINS_MODE: mock
+      APM_MODE: mock
+      TRIAGE_MODE: heuristic
+    ports:
+      - "8000:8000"
+
+volumes:
+  pgdata:

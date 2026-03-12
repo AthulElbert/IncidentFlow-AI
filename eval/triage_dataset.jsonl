@@ -1,0 +1,12 @@
+{"service":"payments-service","metric":"latency_p99_ms","value":1240,"threshold":800,"environment":"prod","message":"Checkout latency increased","expected_issue_type":"performance_degradation"}
+{"service":"payments-service","metric":"response_time_ms","value":920,"threshold":600,"environment":"prod","message":"Response time alert on payment API","expected_issue_type":"performance_degradation"}
+{"service":"orders-service","metric":"error_rate_pct","value":7.2,"threshold":2.0,"environment":"prod","message":"5xx error spike detected","expected_issue_type":"application_error"}
+{"service":"orders-service","metric":"exceptions_per_min","value":150,"threshold":30,"environment":"prod","message":"Unhandled exception surge","expected_issue_type":"application_error"}
+{"service":"inventory-service","metric":"cpu_usage_pct","value":96,"threshold":80,"environment":"prod","message":"CPU saturation observed","expected_issue_type":"resource_saturation"}
+{"service":"inventory-service","metric":"memory_usage_pct","value":92,"threshold":85,"environment":"prod","message":"Memory pressure high","expected_issue_type":"resource_saturation"}
+{"service":"case-service","metric":"db_timeout_count","value":66,"threshold":10,"environment":"prod","message":"DB connection timeout errors","expected_issue_type":"dependency_failure"}
+{"service":"case-service","metric":"connection_failures","value":40,"threshold":5,"environment":"prod","message":"Database connection instability","expected_issue_type":"dependency_failure"}
+{"service":"entitlements-service","metric":"queue_depth","value":5000,"threshold":1000,"environment":"prod","message":"Background queue growth without errors","expected_issue_type":"unknown"}
+{"service":"entitlements-service","metric":"feature_flag_checks","value":9999,"threshold":4000,"environment":"prod","message":"Unknown spike pattern","expected_issue_type":"unknown"}
+{"service":"payments-service","metric":"api_timeout_count","value":70,"threshold":12,"environment":"prod","message":"Gateway timeout contacting db","expected_issue_type":"dependency_failure"}
+{"service":"orders-service","metric":"latency_p95_ms","value":870,"threshold":500,"environment":"prod","message":"Order placement latency high","expected_issue_type":"performance_degradation"}

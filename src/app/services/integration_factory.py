@@ -1,9 +1,9 @@
-﻿from app.adapters.apm_client import HttpAPMClient, MockAPMClient
+from app.adapters.apm_client import HttpAPMClient, MockAPMClient
 from app.adapters.jenkins_client import MockJenkinsClient, RealJenkinsClient
 from app.adapters.jira_client import MockJiraClient, RealJiraClient
 from app.adapters.llm_client import OpenAICompatibleLLMClient
+from app.adapters.pr_client import MockPRClient, RealGitHubPRClient
 from app.config import Settings
-
 
 
 def build_jira_client(settings: Settings):
@@ -19,7 +19,6 @@ def build_jira_client(settings: Settings):
             return MockJiraClient(project_key=settings.jira_project_key), "mock-fallback-startup"
 
     return MockJiraClient(project_key=settings.jira_project_key), "mock"
-
 
 
 def build_jenkins_client(settings: Settings):
@@ -47,7 +46,6 @@ def build_jenkins_client(settings: Settings):
     ), "mock"
 
 
-
 def build_apm_client(settings: Settings):
     if settings.apm_mode == "http":
         try:
@@ -60,7 +58,6 @@ def build_apm_client(settings: Settings):
             return MockAPMClient(), "mock-fallback-startup"
 
     return MockAPMClient(), "mock"
-
 
 
 def build_llm_client(settings: Settings):
@@ -77,3 +74,17 @@ def build_llm_client(settings: Settings):
             return None, "heuristic-fallback-startup"
 
     return None, "heuristic"
+
+
+def build_pr_client(settings: Settings):
+    if settings.pr_mode == "github":
+        try:
+            return RealGitHubPRClient(
+                repo_slug=settings.pr_repo_slug,
+                token=settings.pr_github_token,
+                api_base_url=settings.pr_github_api_base_url,
+            ), "github"
+        except Exception:
+            return MockPRClient(repo_slug=settings.pr_repo_slug), "mock-fallback-startup"
+
+    return MockPRClient(repo_slug=settings.pr_repo_slug), "mock"

@@ -4,6 +4,7 @@ from app.services.integration_factory import (
     build_jenkins_client,
     build_jira_client,
     build_llm_client,
+    build_pr_client,
 )
 
 
@@ -12,6 +13,16 @@ def _base_settings() -> Settings:
     return Settings(
         storage_backend="json",
         database_url="",
+        pr_mode="mock",
+        pr_repo_slug="org/agentic-support",
+        pr_github_token="",
+        pr_github_api_base_url="https://api.github.com",
+        pr_base_branch="main",
+        pr_local_branch_mode="spec",
+        pr_patch_output_dir="generated_patches",
+        test_evidence_mode="mock",
+        test_evidence_command="python -m pytest -q tests",
+        test_evidence_timeout_seconds=120,
         jira_mode="mock",
         jira_base_url="",
         jira_project_key="SUP",
@@ -64,12 +75,14 @@ def test_factory_uses_mock_by_default():
     _, jenkins_mode = build_jenkins_client(settings)
     _, apm_mode = build_apm_client(settings)
     llm_client, triage_mode = build_llm_client(settings)
+    _, pr_mode = build_pr_client(settings)
 
     assert jira_mode == "mock"
     assert jenkins_mode == "mock"
     assert apm_mode == "mock"
     assert llm_client is None
     assert triage_mode == "heuristic"
+    assert pr_mode == "mock"
 
 
 def test_factory_startup_fallback_when_real_config_missing():
@@ -83,6 +96,8 @@ def test_factory_startup_fallback_when_real_config_missing():
             "apm_base_url": "",
             "triage_mode": "llm",
             "llm_api_key": "",
+            "pr_mode": "github",
+            "pr_github_token": "",
         }
     )
 
@@ -90,9 +105,11 @@ def test_factory_startup_fallback_when_real_config_missing():
     _, jenkins_mode = build_jenkins_client(settings)
     _, apm_mode = build_apm_client(settings)
     llm_client, triage_mode = build_llm_client(settings)
+    _, pr_mode = build_pr_client(settings)
 
     assert jira_mode == "mock-fallback-startup"
     assert jenkins_mode == "mock-fallback-startup"
     assert apm_mode == "mock-fallback-startup"
     assert llm_client is None
     assert triage_mode == "heuristic-fallback-startup"
+    assert pr_mode == "mock-fallback-startup"

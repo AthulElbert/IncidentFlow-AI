@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
 
 from app.config import load_settings
 from app.logging_config import setup_logging
@@ -14,6 +15,9 @@ from app.models.schemas import (
     DevExecuteRequest,
     DevExecuteResponse,
     IncidentResponse,
+    MetricsSummary,
+    PRPrepareRequest,
+    PRPrepareResponse,
     PromoteRequest,
     PromoteResponse,
 )
@@ -25,8 +29,11 @@ from app.services.integration_factory import (
     build_jenkins_client,
     build_jira_client,
     build_llm_client,
+    build_pr_client,
 )
 from app.services.pipeline import SupportAgentPipeline
+from app.services.metrics import build_metrics_summary
+from app.services.pr_preparer import PRPreparationService
 from app.services.triage_agent import TriageAgent
 
 app = FastAPI(title="Production Support Agent MVP", version="0.10.0")
@@ -53,6 +60,7 @@ jira_client, jira_mode = build_jira_client(settings)
 jenkins_client, jenkins_mode = build_jenkins_client(settings)
 apm_client, apm_mode = build_apm_client(settings)
 llm_client, triage_mode = build_llm_client(settings)
+pr_client, pr_mode = build_pr_client(settings)
 triage_agent = TriageAgent(
     mode=settings.triage_mode,
     llm_client=llm_client,
@@ -63,6 +71,16 @@ dev_executor = DevFixExecutor(
     apm_client=apm_client,
     min_apm_improvement_pct=settings.dev_min_apm_improvement_pct,
     require_smoke_tests=settings.require_dev_smoke_tests,
+)
+pr_preparer = PRPreparationService(
+    pr_client=pr_client,
+    test_mode=settings.test_evidence_mode,
+    test_command=settings.test_evidence_command,
+    repo_root=str(base_dir),
+    timeout_seconds=settings.test_evidence_timeout_seconds,
+    base_branch=settings.pr_base_branch,
+    local_branch_mode=settings.pr_local_branch_mode,
+    patch_output_dir=settings.pr_patch_output_dir,
 )
 
 pipeline = SupportAgentPipeline(
@@ -104,6 +122,8 @@ logger.info(
         "jenkins_mode": jenkins_mode,
         "apm_mode": apm_mode,
         "triage_mode": triage_mode,
+        "pr_mode": pr_mode,
+        "pr_local_branch_mode": settings.pr_local_branch_mode,
         "log_level": settings.log_level,
         "storage_backend": settings.storage_backend,
         "min_confidence_for_prod": settings.min_confidence_for_prod,
@@ -121,12 +141,19 @@ def health(principal: Principal = Depends(viewer_auth)) -> dict[str, str]:
         "jenkins_mode": jenkins_mode,
         "apm_mode": apm_mode,
         "triage_mode": triage_mode,
+        "pr_mode": pr_mode,
+        "pr_local_branch_mode": settings.pr_local_branch_mode,
         "log_level": settings.log_level,
         "storage_backend": settings.storage_backend,
         "min_confidence_for_prod": str(settings.min_confidence_for_prod),
         "auth_role": principal.role,
         "auth_source": principal.source,
     }
+
+
+@app.get("/dashboard", include_in_schema=False)
+def dashboard() -> FileResponse:
+    return FileResponse(base_dir / "frontend" / "dashboard.html")
 
 
 @app.post("/v1/incidents/process", response_model=IncidentResponse)
@@ -154,6 +181,16 @@ def process_mock_incident(principal: Principal = Depends(viewer_auth)) -> Incide
 def list_changes(status: str | None = Query(default=None), principal: Principal = Depends(viewer_auth)) -> list[ChangeRecord]:
     _ = principal
     return change_store.list_changes(status=status)
+
+
+@app.get("/v1/metrics/summary", response_model=MetricsSummary)
+def get_metrics_summary(principal: Principal = Depends(viewer_auth)) -> MetricsSummary:
+    _ = principal
+    changes = change_store.list_changes()
+    return build_metrics_summary(
+        changes=changes,
+        min_confidence_for_prod=settings.min_confidence_for_prod,
+    )
 
 
 @app.get("/v1/changes/{change_id}", response_model=ChangeRecord)
@@ -201,6 +238,57 @@ def execute_dev_fix(
         dev_execution_status=updated.dev_execution_status,
         dev_execution_url=updated.dev_execution_url or "",
         validation_passed=updated.dev_execution_status == "passed",
+    )
+
+
+@app.post("/v1/changes/{change_id}/prepare-pr", response_model=PRPrepareResponse)
+def prepare_pr(
+    change_id: str,
+    payload: PRPrepareRequest,
+    principal: Principal = Depends(approver_auth),
+) -> PRPrepareResponse:
+    record = change_store.get_change(change_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Change not found")
+
+    try:
+        prepared = pr_preparer.prepare(record, requested_by=principal.actor, comment=payload.comment)
+        updated = change_store.record_pr_preparation(
+            change_id=change_id,
+            generated_by=principal.actor,
+            pr_status=prepared.pr.status,
+            pr_url=prepared.pr.url,
+            pr_branch=prepared.pr.branch,
+            pr_title=prepared.pr.title,
+            pr_summary=prepared.pr_summary,
+            patch_artifact_path=prepared.patch_artifact_path,
+            patch_preview=prepared.patch_preview,
+            local_branch_created=prepared.local_branch_created,
+            local_branch_message=prepared.local_branch_message,
+            test_evidence_status=prepared.test_evidence_status,
+            test_command=prepared.test_command,
+            test_output=prepared.test_output,
+            test_pass_rate=prepared.test_pass_rate,
+        )
+    except ValueError as exc:
+        msg = str(exc)
+        if msg == "Change not found":
+            raise HTTPException(status_code=404, detail=msg) from exc
+        raise HTTPException(status_code=400, detail=msg) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"PR preparation failed: {exc}") from exc
+
+    return PRPrepareResponse(
+        change_id=updated.change_id,
+        pr_status=updated.pr_status,
+        pr_url=updated.pr_url or "",
+        pr_branch=updated.pr_branch or "",
+        local_branch_created=updated.local_branch_created,
+        local_branch_message=updated.local_branch_message or "",
+        patch_artifact_path=updated.patch_artifact_path or "",
+        test_evidence_status=updated.test_evidence_status,
+        test_command=updated.test_command or "",
+        test_pass_rate=updated.test_pass_rate or 0.0,
     )
 
 

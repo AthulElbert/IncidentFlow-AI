@@ -12,6 +12,9 @@ This project is an assistive production-support agent that:
 8. Collects APM evidence for dev-fix validation (mock or HTTP integration).
 9. Requires human approval and policy checks before prod readiness.
 10. Triggers Jenkins prod deploy with audited promotion metadata.
+11. Exposes interview-ready operational metrics via `/v1/metrics/summary`.
+12. Includes offline triage evaluation harness for quality scoring.
+13. Prepares draft PRs with test evidence for human review before deploy.
 
 ## Tech Stack
 
@@ -40,12 +43,17 @@ src/app/services/integration_factory.py # Selects mock vs real adapters
 src/app/services/pipeline.py            # End-to-end orchestration + fallbacks
 src/app/services/dev_fix_executor.py    # Jenkins + APM evidence based dev validation
 src/app/services/change_control.py      # Approval gate + policy checks (JSON or Postgres)
+src/app/services/pr_preparer.py         # Draft PR generation + test evidence collection
+src/app/adapters/pr_client.py           # PR adapters (mock + GitHub-ready)
 src/app/adapters/jira_client.py         # Jira adapters
 src/app/adapters/jenkins_client.py      # Jenkins adapters (dev + prod)
 src/app/adapters/apm_client.py          # APM evidence adapters (mock + http)
 src/app/adapters/llm_client.py          # OpenAI-compatible LLM triage adapter
 data/incident_history.json              # Seeded incident history
 data/change_records.json                # Change approval records
+eval/triage_dataset.jsonl               # Labeled dataset for triage evaluation
+scripts/evaluate_triage.py              # Offline scoring harness
+docker-compose.yml                      # One-command API + Postgres demo
 ```
 
 ## Setup
@@ -71,6 +79,17 @@ Policy settings:
 Storage settings:
 - `STORAGE_BACKEND`: `json` | `postgres`
 - `DATABASE_URL` (required when `STORAGE_BACKEND=postgres`)
+
+PR settings:
+- `PR_MODE`: `mock` | `github`
+- `PR_REPO_SLUG`, `PR_GITHUB_TOKEN`, `PR_GITHUB_API_BASE_URL`, `PR_BASE_BRANCH`
+- `PR_LOCAL_BRANCH_MODE`: `spec` | `git` (create local git branch ref)
+- `PR_PATCH_OUTPUT_DIR`: where generated patch artifacts are written
+
+Test evidence settings:
+- `TEST_EVIDENCE_MODE`: `mock` | `pytest`
+- `TEST_EVIDENCE_COMMAND`
+- `TEST_EVIDENCE_TIMEOUT_SECONDS`
 
 Triage settings:
 - `TRIAGE_MODE`: `heuristic` | `llm`
@@ -100,6 +119,8 @@ $env:PYTHONPATH = "C:\Personal_projects\Agentic_AI_Projects\src"
 
 API docs:
 - http://127.0.0.1:8000/docs
+- Dashboard UI:
+  - http://127.0.0.1:8000/dashboard
 
 ## Run Tests
 
@@ -107,6 +128,35 @@ API docs:
 $env:PYTHONPATH = "C:\Personal_projects\Agentic_AI_Projects\src"
 & "C:\Personal_projects\Agentic_AI_Projects\.venv\Scripts\python.exe" -m pytest -q tests
 ```
+
+## Evaluate Triage Quality (Offline)
+
+```powershell
+$env:PYTHONPATH = "C:\Personal_projects\Agentic_AI_Projects\src"
+& "C:\Personal_projects\Agentic_AI_Projects\.venv\Scripts\python.exe" scripts\evaluate_triage.py --mode heuristic
+```
+
+Output report:
+- `eval/triage_eval_report.json`
+
+For LLM mode:
+- set `LLM_API_KEY` (and optional `LLM_BASE_URL`, `LLM_MODEL`)
+- run `scripts/evaluate_triage.py --mode llm`
+
+## Docker Demo (API + Postgres)
+
+```powershell
+cd C:\Personal_projects\Agentic_AI_Projects
+docker compose up --build
+```
+
+Services:
+- API: `http://127.0.0.1:8000`
+- Postgres: `localhost:5432`
+
+The compose profile runs with:
+- `STORAGE_BACKEND=postgres`
+- `DATABASE_URL=postgresql://postgres:postgres@postgres:5432/agentic_support`
 
 ## APM HTTP Evidence Contract
 
@@ -151,19 +201,24 @@ Role permissions:
 - `POST /v1/incidents/process` (viewer+)
 - `GET /v1/changes` (viewer+)
 - `GET /v1/changes/{change_id}` (viewer+)
+- `GET /v1/metrics/summary` (viewer+)
+- `POST /v1/changes/{change_id}/prepare-pr` (approver+)
 - `POST /v1/changes/{change_id}/execute-dev` (approver+)
 - `POST /v1/changes/{change_id}/decision` (approver+)
 - `POST /v1/changes/{change_id}/promote` (release_operator)
+- `GET /dashboard` (demo web UI)
 
 ## Typical Flow
 
 1. Process incident using `/v1/incidents/process` or `/v1/incidents/mock` (triage + root-cause hypothesis generated).
 2. Read `metadata.change_id` from response.
 3. Review change using `GET /v1/changes/{change_id}`.
-4. Execute dev fix with `POST /v1/changes/{change_id}/execute-dev`.
-5. Approve/reject using `POST /v1/changes/{change_id}/decision`.
-6. If `deployment_state=ready_for_prod`, promote using `POST /v1/changes/{change_id}/promote`.
-7. Promotion triggers Jenkins prod job and stores queue/build URL + result.
+4. Prepare draft PR and test evidence with `POST /v1/changes/{change_id}/prepare-pr`.
+5. This step generates a patch artifact file in `PR_PATCH_OUTPUT_DIR` (for example `generated_patches/CHG-XXXX.patch`) and optionally creates a local git branch when `PR_LOCAL_BRANCH_MODE=git`.
+6. Execute dev fix with `POST /v1/changes/{change_id}/execute-dev`.
+7. Approve/reject using `POST /v1/changes/{change_id}/decision`.
+8. If `deployment_state=ready_for_prod`, promote using `POST /v1/changes/{change_id}/promote`.
+9. Promotion triggers Jenkins prod job and stores queue/build URL + result.
 
 ## Policy Gate Behavior
 

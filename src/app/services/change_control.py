@@ -271,6 +271,55 @@ class ChangeControlStore:
 
         raise ValueError("Change not found")
 
+    def record_pr_preparation(
+        self,
+        change_id: str,
+        generated_by: str,
+        pr_status: str,
+        pr_url: str,
+        pr_branch: str,
+        pr_title: str,
+        pr_summary: str,
+        patch_artifact_path: str,
+        patch_preview: str,
+        local_branch_created: bool,
+        local_branch_message: str,
+        test_evidence_status: str,
+        test_command: str,
+        test_output: str,
+        test_pass_rate: float,
+    ) -> ChangeRecord:
+        with self._lock:
+            for idx, record in enumerate(self._records):
+                if record.change_id != change_id:
+                    continue
+
+                updated = record.model_copy(
+                    update={
+                        "pr_status": "draft_created" if pr_status.lower() == "draft" else "failed",
+                        "pr_url": pr_url,
+                        "pr_branch": pr_branch,
+                        "pr_title": pr_title,
+                        "pr_summary": pr_summary,
+                        "pr_generated_at": datetime.now(timezone.utc),
+                        "pr_generated_by": generated_by,
+                        "patch_artifact_path": patch_artifact_path,
+                        "patch_preview": patch_preview,
+                        "local_branch_created": local_branch_created,
+                        "local_branch_message": local_branch_message,
+                        "test_evidence_status": test_evidence_status,
+                        "test_command": test_command,
+                        "test_output": test_output,
+                        "test_pass_rate": test_pass_rate,
+                        "test_run_at": datetime.now(timezone.utc),
+                    }
+                )
+                self._records[idx] = updated
+                self._persist()
+                return updated
+
+        raise ValueError("Change not found")
+
     def _load_from_postgres(self) -> list[ChangeRecord]:
         conn = self._pg_connect()
         with conn:

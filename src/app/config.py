@@ -43,6 +43,16 @@ def _as_list(value: str | None, default: list[str]) -> list[str]:
 class Settings:
     storage_backend: str
     database_url: str
+    pr_mode: str
+    pr_repo_slug: str
+    pr_github_token: str
+    pr_github_api_base_url: str
+    pr_base_branch: str
+    pr_local_branch_mode: str
+    pr_patch_output_dir: str
+    test_evidence_mode: str
+    test_evidence_command: str
+    test_evidence_timeout_seconds: int
     jira_mode: str
     jira_base_url: str
     jira_project_key: str
@@ -99,6 +109,16 @@ def load_settings(base_dir: str | None = None) -> Settings:
     return Settings(
         storage_backend=os.getenv("STORAGE_BACKEND", "json").strip().lower(),
         database_url=os.getenv("DATABASE_URL", "").strip(),
+        pr_mode=os.getenv("PR_MODE", "mock").strip().lower(),
+        pr_repo_slug=os.getenv("PR_REPO_SLUG", "org/agentic-support").strip(),
+        pr_github_token=os.getenv("PR_GITHUB_TOKEN", "").strip(),
+        pr_github_api_base_url=os.getenv("PR_GITHUB_API_BASE_URL", "https://api.github.com").strip(),
+        pr_base_branch=os.getenv("PR_BASE_BRANCH", "main").strip(),
+        pr_local_branch_mode=os.getenv("PR_LOCAL_BRANCH_MODE", "spec").strip().lower(),
+        pr_patch_output_dir=os.getenv("PR_PATCH_OUTPUT_DIR", "generated_patches").strip(),
+        test_evidence_mode=os.getenv("TEST_EVIDENCE_MODE", "mock").strip().lower(),
+        test_evidence_command=os.getenv("TEST_EVIDENCE_COMMAND", "python -m pytest -q tests").strip(),
+        test_evidence_timeout_seconds=_as_int(os.getenv("TEST_EVIDENCE_TIMEOUT_SECONDS"), default=120),
         jira_mode=os.getenv("JIRA_MODE", "mock").strip().lower(),
         jira_base_url=os.getenv("JIRA_BASE_URL", "").strip(),
         jira_project_key=os.getenv("JIRA_PROJECT_KEY", "SUP").strip(),
