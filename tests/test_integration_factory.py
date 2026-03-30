@@ -1,5 +1,6 @@
 ﻿from app.config import Settings
 from app.services.integration_factory import (
+    build_apm_alert_source,
     build_apm_client,
     build_jenkins_client,
     build_jira_client,
@@ -25,6 +26,20 @@ def _base_settings() -> Settings:
         code_change_max_lines=200,
         code_change_auto_commit=False,
         code_change_auto_push=False,
+        apm_poll_mode="off",
+        apm_poll_interval_seconds=30,
+        apm_alerts_mode="mock",
+        apm_alerts_base_url="http://localhost:9001",
+        apm_alerts_dynatrace_token="",
+        apm_alerts_timeout_seconds=10,
+        apm_alert_queue_file="data/apm_alert_queue.json",
+        auto_remediation_mode="assistive",
+        safe_auto_issue_types=["PERFORMANCE_DEGRADATION", "DEPENDENCY_FAILURE"],
+        auto_promote_on_policy_pass=False,
+        scheduler_actor="scheduler-agent",
+        scheduler_approver_actor="scheduler-approver",
+        scheduler_release_actor="scheduler-release",
+        scheduler_dedup_file="data/processed_alerts.json",
         test_evidence_mode="mock",
         test_evidence_command="python -m pytest -q tests",
         test_evidence_timeout_seconds=120,
@@ -76,6 +91,7 @@ def _base_settings() -> Settings:
 
 def test_factory_uses_mock_by_default():
     settings = _base_settings()
+    _, alert_mode = build_apm_alert_source(settings, "C:/tmp")
     _, jira_mode = build_jira_client(settings)
     _, jenkins_mode = build_jenkins_client(settings)
     _, apm_mode = build_apm_client(settings)
@@ -83,6 +99,7 @@ def test_factory_uses_mock_by_default():
     _, pr_mode = build_pr_client(settings)
 
     assert jira_mode == "mock"
+    assert alert_mode == "mock"
     assert jenkins_mode == "mock"
     assert apm_mode == "mock"
     assert llm_client is None
@@ -99,6 +116,8 @@ def test_factory_startup_fallback_when_real_config_missing():
             "jenkins_mode": "real",
             "apm_mode": "http",
             "apm_base_url": "",
+            "apm_alerts_mode": "http",
+            "apm_alerts_base_url": "",
             "triage_mode": "llm",
             "llm_api_key": "",
             "pr_mode": "github",
@@ -106,6 +125,7 @@ def test_factory_startup_fallback_when_real_config_missing():
         }
     )
 
+    _, alert_mode = build_apm_alert_source(settings, "C:/tmp")
     _, jira_mode = build_jira_client(settings)
     _, jenkins_mode = build_jenkins_client(settings)
     _, apm_mode = build_apm_client(settings)
@@ -113,8 +133,16 @@ def test_factory_startup_fallback_when_real_config_missing():
     _, pr_mode = build_pr_client(settings)
 
     assert jira_mode == "mock-fallback-startup"
+    assert alert_mode == "mock-fallback-startup"
     assert jenkins_mode == "mock-fallback-startup"
     assert apm_mode == "mock-fallback-startup"
     assert llm_client is None
     assert triage_mode == "heuristic-fallback-startup"
     assert pr_mode == "mock-fallback-startup"
+
+
+def test_factory_dynatrace_alert_source_mode():
+    settings = _base_settings()
+    settings = Settings(**{**settings.__dict__, "apm_alerts_mode": "dynatrace", "apm_alerts_dynatrace_token": "x"})
+    _, mode = build_apm_alert_source(settings, "C:/tmp")
+    assert mode == "dynatrace"

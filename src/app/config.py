@@ -55,6 +55,20 @@ class Settings:
     code_change_max_lines: int
     code_change_auto_commit: bool
     code_change_auto_push: bool
+    apm_poll_mode: str
+    apm_poll_interval_seconds: int
+    apm_alerts_mode: str
+    apm_alerts_base_url: str
+    apm_alerts_dynatrace_token: str
+    apm_alerts_timeout_seconds: int
+    apm_alert_queue_file: str
+    auto_remediation_mode: str
+    safe_auto_issue_types: list[str]
+    auto_promote_on_policy_pass: bool
+    scheduler_actor: str
+    scheduler_approver_actor: str
+    scheduler_release_actor: str
+    scheduler_dedup_file: str
     test_evidence_mode: str
     test_evidence_command: str
     test_evidence_timeout_seconds: int
@@ -126,6 +140,23 @@ def load_settings(base_dir: str | None = None) -> Settings:
         code_change_max_lines=_as_int(os.getenv("CODE_CHANGE_MAX_LINES"), default=200),
         code_change_auto_commit=_as_bool(os.getenv("CODE_CHANGE_AUTO_COMMIT"), default=False),
         code_change_auto_push=_as_bool(os.getenv("CODE_CHANGE_AUTO_PUSH"), default=False),
+        apm_poll_mode=os.getenv("APM_POLL_MODE", "off").strip().lower(),
+        apm_poll_interval_seconds=_as_int(os.getenv("APM_POLL_INTERVAL_SECONDS"), default=30),
+        apm_alerts_mode=os.getenv("APM_ALERTS_MODE", "mock").strip().lower(),
+        apm_alerts_base_url=os.getenv("APM_ALERTS_BASE_URL", "http://localhost:9001").strip(),
+        apm_alerts_dynatrace_token=os.getenv("APM_ALERTS_DYNATRACE_TOKEN", "").strip(),
+        apm_alerts_timeout_seconds=_as_int(os.getenv("APM_ALERTS_TIMEOUT_SECONDS"), default=10),
+        apm_alert_queue_file=os.getenv("APM_ALERT_QUEUE_FILE", "data/apm_alert_queue.json").strip(),
+        auto_remediation_mode=os.getenv("AUTO_REMEDIATION_MODE", "assistive").strip().lower(),
+        safe_auto_issue_types=_as_list(
+            os.getenv("SAFE_AUTO_ISSUE_TYPES"),
+            default=["PERFORMANCE_DEGRADATION", "DEPENDENCY_FAILURE"],
+        ),
+        auto_promote_on_policy_pass=_as_bool(os.getenv("AUTO_PROMOTE_ON_POLICY_PASS"), default=False),
+        scheduler_actor=os.getenv("SCHEDULER_ACTOR", "scheduler-agent").strip(),
+        scheduler_approver_actor=os.getenv("SCHEDULER_APPROVER_ACTOR", "scheduler-approver").strip(),
+        scheduler_release_actor=os.getenv("SCHEDULER_RELEASE_ACTOR", "scheduler-release").strip(),
+        scheduler_dedup_file=os.getenv("SCHEDULER_DEDUP_FILE", "data/processed_alerts.json").strip(),
         test_evidence_mode=os.getenv("TEST_EVIDENCE_MODE", "mock").strip().lower(),
         test_evidence_command=os.getenv("TEST_EVIDENCE_COMMAND", "python -m pytest -q tests").strip(),
         test_evidence_timeout_seconds=_as_int(os.getenv("TEST_EVIDENCE_TIMEOUT_SECONDS"), default=120),

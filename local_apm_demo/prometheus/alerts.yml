@@ -1,0 +1,50 @@
+groups:
+  - name: sample-app-alerts
+    rules:
+      - alert: FaultyProjectHighLatencyP95
+        expr: histogram_quantile(0.95, sum(rate(faulty_request_duration_seconds_bucket[1m])) by (le)) > 1.3
+        for: 25s
+        labels:
+          severity: warning
+          service: faulty-project
+          metric: latency_p95_seconds
+          threshold: "1.3"
+        annotations:
+          summary: "Faulty project checkout latency p95 is high"
+          description: "Faulty project p95 latency is above 1.3s for the last 25 seconds"
+
+      - alert: FaultyProjectHighErrorRate
+        expr: rate(faulty_requests_total{status="error"}[1m]) > 0.12
+        for: 20s
+        labels:
+          severity: critical
+          service: faulty-project
+          metric: error_rate_per_sec
+          threshold: "0.12"
+        annotations:
+          summary: "Faulty project checkout error rate is high"
+          description: "Faulty project error rate is above 0.12 req/sec for the last 20 seconds"
+
+      - alert: HighLatencyP95
+        expr: histogram_quantile(0.95, sum(rate(app_request_duration_seconds_bucket[1m])) by (le)) > 1.2
+        for: 30s
+        labels:
+          severity: warning
+          service: sample-app
+          metric: latency_p95_seconds
+          threshold: "1.2"
+        annotations:
+          summary: "Sample app latency p95 is high"
+          description: "p95 latency is above 1.2s for the last 30 seconds"
+
+      - alert: HighErrorRate
+        expr: rate(app_requests_total{status="error"}[1m]) > 0.1
+        for: 20s
+        labels:
+          severity: critical
+          service: sample-app
+          metric: error_rate_per_sec
+          threshold: "0.1"
+        annotations:
+          summary: "Sample app error rate is high"
+          description: "Error rate is above 0.1 req/sec for the last 20 seconds"

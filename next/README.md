@@ -28,6 +28,8 @@ This is not unrestricted autonomy. It is controlled automation with governance.
 ## 3. Capability Map
 
 - Incident ingestion API (`mock` and custom events)
+- Scheduler polling mode for continuous APM alert intake
+- Real APM poll connector option (Dynatrace problems API)
 - Heuristic + LLM triage with fallback safety
 - Jira and Jenkins integration via adapter abstraction
 - JSON/Postgres backend switch
@@ -55,6 +57,7 @@ Guardrails implemented:
   - required dev evidence pass
 - RBAC with `viewer`, `approver`, `release_operator`
 - Structured audit data per change record
+- Deduped scheduler processing (`source_alert_id` based)
 
 ## 5. Architecture Decisions
 

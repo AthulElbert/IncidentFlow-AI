@@ -16,6 +16,7 @@ Assistive production-support system for incident triage, safe fix orchestration,
 - Enforces human approval and policy gates before prod
 - Promotes to production via Jenkins with audit metadata
 - Exposes metrics API and dashboard UI
+- Supports scheduler polling mode from APM alert sources
 
 ## Current Architecture
 
@@ -110,6 +111,16 @@ Key settings groups:
   - `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`
 - Integrations:
   - `JIRA_MODE`, `JENKINS_MODE`, `APM_MODE`
+- Scheduler:
+  - `APM_POLL_MODE`: `off` | `poll`
+  - `APM_POLL_INTERVAL_SECONDS`
+  - `APM_ALERTS_MODE`: `mock` | `http` | `dynatrace`
+  - `APM_ALERTS_BASE_URL`, `APM_ALERTS_TIMEOUT_SECONDS`
+  - `APM_ALERTS_DYNATRACE_TOKEN` (required for dynatrace mode)
+  - `APM_ALERT_QUEUE_FILE`
+  - `AUTO_REMEDIATION_MODE`: `assistive` | `safe_auto` | `full_auto`
+  - `SAFE_AUTO_ISSUE_TYPES`
+  - `AUTO_PROMOTE_ON_POLICY_PASS`
 - Policy:
   - `MIN_CONFIDENCE_FOR_PROD`
   - `REQUIRE_ZERO_WARNINGS_FOR_PROD`
@@ -135,6 +146,9 @@ Open:
 - `GET /health`
 - `POST /v1/incidents/mock`
 - `POST /v1/incidents/process`
+- `POST /v1/apm/mock-alerts` (enqueue alert for scheduler demo)
+- `GET /v1/scheduler/status`
+- `POST /v1/scheduler/run-once`
 - `GET /v1/changes`
 - `GET /v1/changes/{change_id}`
 - `GET /v1/metrics/summary`
@@ -164,6 +178,7 @@ Notes:
   - `unknown` (manual triage template)
 - If `PR_LOCAL_BRANCH_MODE=git`, service attempts `git branch <generated-branch>`
 - If `CODE_CHANGE_MODE=sandbox_git`, service creates/uses `.agent_worktrees/<branch>` and applies real file edits with path/size guardrails.
+- In scheduler mode (`APM_POLL_MODE=poll`), the app continuously polls alerts and applies dedup before processing.
 
 ## Dashboard Demo
 
@@ -173,6 +188,18 @@ Notes:
 - Metrics refresh
 - Mock incident generation
 - `prepare-pr` trigger by `change_id`
+
+## One-Command Demo Check
+
+Use the quick local checker in `demo_project/`:
+
+```powershell
+cd C:\Personal_projects\Agentic_AI_Projects
+$env:PYTHONPATH="C:\Personal_projects\Agentic_AI_Projects\src"
+& "C:\Personal_projects\Agentic_AI_Projects\.venv\Scripts\python.exe" demo_project\run_demo.py
+```
+
+Details: `demo_project/README.md`
 
 ## Triage Evaluation Harness
 
@@ -203,6 +230,49 @@ Services:
 
 - API: `http://127.0.0.1:8000`
 - Postgres: `localhost:5432`
+
+## Local APM Stack (No Dynatrace Account)
+
+Use the bundled local stack in `local_apm_demo/`:
+
+- Prometheus + Alertmanager + Grafana
+- Sample app with intentional latency/error endpoints
+- Alert bridge exposing `/v1/alerts` for scheduler polling
+
+Quick start:
+
+```powershell
+cd C:\Personal_projects\Agentic_AI_Projects\local_apm_demo
+docker compose up --build
+```
+
+Then set in main project `.env`:
+
+```env
+APM_POLL_MODE=poll
+APM_ALERTS_MODE=http
+APM_ALERTS_BASE_URL=http://127.0.0.1:8085
+```
+
+Use `local_apm_demo/loadgen.py` to trigger alerts.
+
+## Dynatrace Poller Setup (Real APM Connector)
+
+Set:
+
+```env
+APM_POLL_MODE=poll
+APM_ALERTS_MODE=dynatrace
+APM_ALERTS_BASE_URL=https://<tenant>.live.dynatrace.com
+APM_ALERTS_DYNATRACE_TOKEN=<dynatrace-api-token>
+APM_ALERTS_TIMEOUT_SECONDS=10
+```
+
+Connector behavior:
+
+- Polls `GET /api/v2/problems` for open problems
+- Maps problems to internal `APMEvent`
+- Uses `problemId` as dedup source alert id
 
 ## Testing
 

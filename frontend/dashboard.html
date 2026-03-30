@@ -165,6 +165,20 @@
     </div>
 
     <div class="panel">
+      <div class="controls">
+        <input id="schedulerAlertId" type="text" placeholder="Optional scheduler alert ID (e.g., apm-1001)">
+        <button id="queueAlertBtn">Queue Scheduler Alert</button>
+        <button id="runSchedulerBtn" class="secondary">Run Scheduler Once</button>
+      </div>
+      <div class="controls" style="margin-top:8px;">
+        <input id="schedulerStatusMode" type="text" placeholder="Scheduler mode/status appears below" disabled>
+        <button id="refreshSchedulerBtn">Refresh Scheduler Status</button>
+        <button id="seedSafeAlertBtn" class="secondary">Seed Safe Alert</button>
+      </div>
+      <div id="schedulerStatusText" class="status">Scheduler status not loaded yet.</div>
+    </div>
+
+    <div class="panel">
       <div class="grid">
         <div class="kpi"><div class="label">Total Changes</div><div id="k-total" class="value">0</div></div>
         <div class="kpi"><div class="label">Avg Confidence</div><div id="k-conf" class="value">0.00</div></div>
@@ -205,6 +219,13 @@
     const preparePrBtn = document.getElementById("preparePrBtn");
     const copyLastBtn = document.getElementById("copyLastBtn");
     const changeIdEl = document.getElementById("changeId");
+    const schedulerAlertIdEl = document.getElementById("schedulerAlertId");
+    const schedulerStatusModeEl = document.getElementById("schedulerStatusMode");
+    const schedulerStatusTextEl = document.getElementById("schedulerStatusText");
+    const queueAlertBtn = document.getElementById("queueAlertBtn");
+    const runSchedulerBtn = document.getElementById("runSchedulerBtn");
+    const refreshSchedulerBtn = document.getElementById("refreshSchedulerBtn");
+    const seedSafeAlertBtn = document.getElementById("seedSafeAlertBtn");
     let lastChangeId = "";
 
     function setStatus(text) {
@@ -346,10 +367,119 @@
       setStatus(`Using last change ID: ${lastChangeId}`);
     }
 
+    function schedulerSummaryText(body) {
+      const stats = body?.stats || {};
+      const processed = Number(stats.alerts_processed || 0);
+      const skipped = Number(stats.alerts_skipped_dedup || 0);
+      const failed = Number(stats.alerts_failed || 0);
+      const runs = Number(stats.runs || 0);
+      return `runs=${runs}, processed=${processed}, dedup_skipped=${skipped}, failed=${failed}`;
+    }
+
+    async function refreshSchedulerStatus() {
+      refreshSchedulerBtn.disabled = true;
+      try {
+        const res = await fetch("/v1/scheduler/status", {
+          method: "GET",
+          headers: headers(),
+        });
+        if (!res.ok) {
+          const t = await res.text();
+          throw new Error(`scheduler status failed: ${res.status} ${t}`);
+        }
+        const body = await res.json();
+        const mode = body?.auto_remediation_mode || "unknown";
+        const running = body?.running ? "running" : "stopped";
+        schedulerStatusModeEl.value = `${running} | auto_remediation=${mode}`;
+        schedulerStatusTextEl.textContent = schedulerSummaryText(body);
+      } catch (err) {
+        schedulerStatusTextEl.textContent = String(err);
+      } finally {
+        refreshSchedulerBtn.disabled = false;
+      }
+    }
+
+    function buildAlertPayload(isSafeTemplate) {
+      if (isSafeTemplate) {
+        return {
+          service: "payments-service",
+          metric: "latency_p99_ms",
+          value: 1300,
+          threshold: 800,
+          environment: "prod",
+          timestamp: new Date().toISOString(),
+          message: "Scheduler seeded safe alert: checkout latency increased"
+        };
+      }
+      return {
+        service: "orders-service",
+        metric: "error_rate_pct",
+        value: 7.5,
+        threshold: 2.0,
+        environment: "prod",
+        timestamp: new Date().toISOString(),
+        message: "Scheduler alert: elevated 5xx rate in orders API"
+      };
+    }
+
+    async function queueSchedulerAlert(isSafeTemplate = false) {
+      queueAlertBtn.disabled = true;
+      seedSafeAlertBtn.disabled = true;
+      setStatus("Queueing scheduler alert...");
+      try {
+        const payload = buildAlertPayload(isSafeTemplate);
+        const sourceId = schedulerAlertIdEl.value.trim();
+        const qs = sourceId ? `?source_alert_id=${encodeURIComponent(sourceId)}` : "";
+        const res = await fetch(`/v1/apm/mock-alerts${qs}`, {
+          method: "POST",
+          headers: headers(),
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const t = await res.text();
+          throw new Error(`queue alert failed: ${res.status} ${t}`);
+        }
+        const body = await res.json();
+        setStatus(`Queued scheduler alert: ${body.source_alert_id}`);
+        await refreshSchedulerStatus();
+      } catch (err) {
+        setStatus(String(err));
+      } finally {
+        queueAlertBtn.disabled = false;
+        seedSafeAlertBtn.disabled = false;
+      }
+    }
+
+    async function runSchedulerOnce() {
+      runSchedulerBtn.disabled = true;
+      setStatus("Running scheduler cycle...");
+      try {
+        const res = await fetch("/v1/scheduler/run-once", {
+          method: "POST",
+          headers: headers(),
+        });
+        if (!res.ok) {
+          const t = await res.text();
+          throw new Error(`scheduler run failed: ${res.status} ${t}`);
+        }
+        setStatus("Scheduler cycle completed.");
+        await refreshSchedulerStatus();
+        await loadMetrics();
+      } catch (err) {
+        setStatus(String(err));
+      } finally {
+        runSchedulerBtn.disabled = false;
+      }
+    }
+
     refreshBtn.addEventListener("click", loadMetrics);
     mockBtn.addEventListener("click", createMockIncident);
     preparePrBtn.addEventListener("click", prepareDraftPr);
     copyLastBtn.addEventListener("click", useLastChangeId);
+    queueAlertBtn.addEventListener("click", () => queueSchedulerAlert(false));
+    seedSafeAlertBtn.addEventListener("click", () => queueSchedulerAlert(true));
+    runSchedulerBtn.addEventListener("click", runSchedulerOnce);
+    refreshSchedulerBtn.addEventListener("click", refreshSchedulerStatus);
   </script>
 </body>
 </html>

@@ -1,4 +1,5 @@
-﻿import logging
+import json
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -25,18 +26,20 @@ from app.security import AuthManager, Principal
 from app.services.change_control import ChangeControlStore, PolicyConfig
 from app.services.dev_fix_executor import DevFixExecutor
 from app.services.integration_factory import (
+    build_apm_alert_source,
     build_apm_client,
     build_jenkins_client,
     build_jira_client,
     build_llm_client,
     build_pr_client,
 )
-from app.services.pipeline import SupportAgentPipeline
 from app.services.metrics import build_metrics_summary
+from app.services.pipeline import SupportAgentPipeline
 from app.services.pr_preparer import PRPreparationService
+from app.services.scheduler import AlertDedupStore, IncidentScheduler
 from app.services.triage_agent import TriageAgent
 
-app = FastAPI(title="Production Support Agent MVP", version="0.10.0")
+app = FastAPI(title="Production Support Agent MVP", version="0.11.0")
 
 base_dir = Path(__file__).resolve().parents[2]
 settings = load_settings(str(base_dir))
@@ -59,6 +62,7 @@ change_store = ChangeControlStore(
 jira_client, jira_mode = build_jira_client(settings)
 jenkins_client, jenkins_mode = build_jenkins_client(settings)
 apm_client, apm_mode = build_apm_client(settings)
+apm_alert_source, apm_alerts_mode = build_apm_alert_source(settings, str(base_dir))
 llm_client, triage_mode = build_llm_client(settings)
 pr_client, pr_mode = build_pr_client(settings)
 triage_agent = TriageAgent(
@@ -100,6 +104,25 @@ pipeline = SupportAgentPipeline(
     database_url=settings.database_url,
 )
 
+scheduler_dedup_path = str(base_dir / settings.scheduler_dedup_file)
+alert_dedup_store = AlertDedupStore(file_path=scheduler_dedup_path)
+scheduler = IncidentScheduler(
+    alert_source=apm_alert_source,
+    pipeline=pipeline,
+    change_store=change_store,
+    pr_preparer=pr_preparer,
+    dev_executor=dev_executor,
+    jenkins_client=jenkins_client,
+    dedup_store=alert_dedup_store,
+    poll_interval_seconds=settings.apm_poll_interval_seconds,
+    auto_remediation_mode=settings.auto_remediation_mode,
+    safe_auto_issue_types=settings.safe_auto_issue_types,
+    auto_promote_on_policy_pass=settings.auto_promote_on_policy_pass,
+    scheduler_actor=settings.scheduler_actor,
+    scheduler_approver_actor=settings.scheduler_approver_actor,
+    scheduler_release_actor=settings.scheduler_release_actor,
+)
+
 auth = AuthManager(
     enabled=settings.auth_enabled,
     mode=settings.auth_mode,
@@ -126,6 +149,9 @@ logger.info(
         "jira_mode": jira_mode,
         "jenkins_mode": jenkins_mode,
         "apm_mode": apm_mode,
+        "apm_alerts_mode": apm_alerts_mode,
+        "apm_poll_mode": settings.apm_poll_mode,
+        "auto_remediation_mode": settings.auto_remediation_mode,
         "triage_mode": triage_mode,
         "pr_mode": pr_mode,
         "pr_local_branch_mode": settings.pr_local_branch_mode,
@@ -138,6 +164,14 @@ logger.info(
     },
 )
 
+if settings.apm_poll_mode == "poll":
+    scheduler.start()
+
+
+@app.on_event("shutdown")
+def shutdown_scheduler() -> None:
+    scheduler.stop()
+
 
 @app.get("/health")
 def health(principal: Principal = Depends(viewer_auth)) -> dict[str, str]:
@@ -146,10 +180,14 @@ def health(principal: Principal = Depends(viewer_auth)) -> dict[str, str]:
         "jira_mode": jira_mode,
         "jenkins_mode": jenkins_mode,
         "apm_mode": apm_mode,
+        "apm_alerts_mode": apm_alerts_mode,
+        "apm_poll_mode": settings.apm_poll_mode,
+        "auto_remediation_mode": settings.auto_remediation_mode,
         "triage_mode": triage_mode,
         "pr_mode": pr_mode,
         "pr_local_branch_mode": settings.pr_local_branch_mode,
         "code_change_mode": settings.code_change_mode,
+        "scheduler_running": str(scheduler.status()["running"]).lower(),
         "log_level": settings.log_level,
         "storage_backend": settings.storage_backend,
         "min_confidence_for_prod": str(settings.min_confidence_for_prod),
@@ -161,6 +199,47 @@ def health(principal: Principal = Depends(viewer_auth)) -> dict[str, str]:
 @app.get("/dashboard", include_in_schema=False)
 def dashboard() -> FileResponse:
     return FileResponse(base_dir / "frontend" / "dashboard.html")
+
+
+@app.get("/v1/scheduler/status")
+def get_scheduler_status(principal: Principal = Depends(approver_auth)) -> dict:
+    _ = principal
+    return scheduler.status()
+
+
+@app.post("/v1/scheduler/run-once")
+def run_scheduler_once(principal: Principal = Depends(approver_auth)) -> dict:
+    _ = principal
+    return scheduler.run_once()
+
+
+@app.post("/v1/apm/mock-alerts")
+def enqueue_mock_alert(event: APMEvent, source_alert_id: str | None = None, principal: Principal = Depends(approver_auth)) -> dict:
+    _ = principal
+    queue_path = base_dir / settings.apm_alert_queue_file
+    queue_path.parent.mkdir(parents=True, exist_ok=True)
+    if queue_path.exists():
+        raw = json.loads(queue_path.read_text(encoding="utf-8-sig"))
+        if not isinstance(raw, list):
+            raw = []
+    else:
+        raw = []
+
+    alert_id = source_alert_id or f"alert-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}"
+    raw.append(
+        {
+            "source_alert_id": alert_id,
+            "service": event.service,
+            "metric": event.metric,
+            "value": event.value,
+            "threshold": event.threshold,
+            "environment": event.environment,
+            "timestamp": event.timestamp.isoformat(),
+            "message": event.message,
+        }
+    )
+    queue_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+    return {"status": "queued", "source_alert_id": alert_id, "queue_file": str(queue_path)}
 
 
 @app.post("/v1/incidents/process", response_model=IncidentResponse)

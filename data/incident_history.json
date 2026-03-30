@@ -1,349 +1,170 @@
 [
   {
-    "incident_id": "INC-A1B2C3D4",
-    "service": "payments-service",
-    "metric": "latency_p99_ms",
+    "incident_id": "INC-0774F095",
+    "service": "faulty-project",
+    "metric": "latency_p95_seconds",
     "issue_type": "performance_degradation",
-    "summary": "[Recurring] payments-service - performance_degradation in prod",
-    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
-    "runbook_actions": [
-      "Scale replicas in dev and compare p95/p99 latency.",
-      "Tune gateway timeout by +10% and rerun synthetic tests."
-    ],
-    "created_at": "2026-02-24T10:30:00Z"
-  },
-  {
-    "incident_id": "INC-E5F6G7H8",
-    "service": "orders-service",
-    "metric": "error_rate_5xx",
-    "issue_type": "application_error",
-    "summary": "[New] orders-service - application_error in prod",
-    "resolution": "Disabled a faulty feature flag and restarted app pods.",
-    "runbook_actions": [
-      "Roll back feature flag in dev.",
-      "Validate 5xx reduction with canary load."
-    ],
-    "created_at": "2026-02-27T16:45:00Z"
-  },
-  {
-    "incident_id": "INC-17499300",
-    "service": "payments-service",
-    "metric": "latency_p99_ms",
-    "issue_type": "performance_degradation",
-    "summary": "[New] payments-service - performance_degradation in prod",
-    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
-    "runbook_actions": [
-      "Check p95/p99 latency breakdown by endpoint in APM.",
-      "Scale service replicas by +1 in dev and verify latency trend.",
-      "Temporarily increase upstream timeout by 10-15% in dev config."
-    ],
-    "created_at": "2026-03-04T17:33:09.048354"
-  },
-  {
-    "incident_id": "INC-717ACB9B",
-    "service": "payments-service",
-    "metric": "latency_p99_ms",
-    "issue_type": "performance_degradation",
-    "summary": "[New] payments-service - performance_degradation in prod",
-    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
-    "runbook_actions": [
-      "Check p95/p99 latency breakdown by endpoint in APM.",
-      "Scale service replicas by +1 in dev and verify latency trend.",
-      "Temporarily increase upstream timeout by 10-15% in dev config."
-    ],
-    "created_at": "2026-03-04T17:33:34.925843Z"
-  },
-  {
-    "incident_id": "INC-83A37D89",
-    "service": "payments-service",
-    "metric": "latency_p99_ms",
-    "issue_type": "performance_degradation",
-    "summary": "[New] payments-service - performance_degradation in prod",
-    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
-    "runbook_actions": [
-      "Check p95/p99 latency breakdown by endpoint in APM.",
-      "Scale service replicas by +1 in dev and verify latency trend.",
-      "Temporarily increase upstream timeout by 10-15% in dev config."
-    ],
-    "created_at": "2026-03-04T17:34:34.039175Z"
-  },
-  {
-    "incident_id": "INC-0E4C366B",
-    "service": "payments-service",
-    "metric": "latency_p99_ms",
-    "issue_type": "performance_degradation",
-    "summary": "[New] payments-service - performance_degradation in prod",
-    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
-    "runbook_actions": [
-      "Check p95/p99 latency breakdown by endpoint in APM.",
-      "Scale service replicas by +1 in dev and verify latency trend.",
-      "Temporarily increase upstream timeout by 10-15% in dev config."
-    ],
-    "created_at": "2026-03-04T17:37:13.174352Z"
-  },
-  {
-    "incident_id": "INC-7CB02D01",
-    "service": "payments-service",
-    "metric": "latency_p99_ms",
-    "issue_type": "performance_degradation",
-    "summary": "[New] payments-service - performance_degradation in prod",
-    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
-    "runbook_actions": [
-      "Check p95/p99 latency breakdown by endpoint in APM.",
-      "Scale service replicas by +1 in dev and verify latency trend.",
-      "Temporarily increase upstream timeout by 10-15% in dev config."
-    ],
-    "created_at": "2026-03-04T17:49:48.597605Z"
-  },
-  {
-    "incident_id": "INC-6EB42AE0",
-    "service": "search-service",
-    "metric": "custom_signal",
-    "issue_type": "unknown",
-    "summary": "[New] search-service - unknown in prod",
+    "summary": "[New] faulty-project - performance_degradation in local",
     "resolution": "No known resolution. Apply suggested runbook actions in dev and validate.",
     "runbook_actions": [
-      "Collect expanded logs and trace ids for the failing request path.",
-      "Create manual triage task for SRE/on-call with service owner."
-    ],
-    "created_at": "2026-03-04T17:53:29.343738Z"
-  },
-  {
-    "incident_id": "INC-E19D60B1",
-    "service": "payments-service",
-    "metric": "latency_p99_ms",
-    "issue_type": "performance_degradation",
-    "summary": "[New] payments-service - performance_degradation in prod",
-    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
-    "runbook_actions": [
       "Check p95/p99 latency breakdown by endpoint in APM.",
       "Scale service replicas by +1 in dev and verify latency trend.",
       "Temporarily increase upstream timeout by 10-15% in dev config."
     ],
-    "created_at": "2026-03-04T17:56:57.151707Z"
+    "created_at": "2026-03-30T16:00:41.699743Z"
   },
   {
-    "incident_id": "INC-9CD086F2",
-    "service": "payments-service",
-    "metric": "latency_p99_ms",
-    "issue_type": "performance_degradation",
-    "summary": "[New] payments-service - performance_degradation in prod",
-    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
+    "incident_id": "INC-8B2AEB0D",
+    "service": "faulty-project",
+    "metric": "error_rate_per_sec",
+    "issue_type": "application_error",
+    "summary": "[New] faulty-project - application_error in local",
+    "resolution": "No known resolution. Apply suggested runbook actions in dev and validate.",
     "runbook_actions": [
-      "Check p95/p99 latency breakdown by endpoint in APM.",
-      "Scale service replicas by +1 in dev and verify latency trend.",
-      "Temporarily increase upstream timeout by 10-15% in dev config."
+      "Inspect recent deployment diff and rollback candidate changes in dev.",
+      "Enable safe-mode feature flags for failing module.",
+      "Validate error-rate drop after config toggle in dev."
     ],
-    "created_at": "2026-03-04T18:04:11.646680Z"
+    "created_at": "2026-03-30T16:00:56.718365Z"
   },
   {
-    "incident_id": "INC-0FF7CDEB",
-    "service": "payments-service",
-    "metric": "latency_p99_ms",
-    "issue_type": "performance_degradation",
-    "summary": "[New] payments-service - performance_degradation in prod",
-    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
+    "incident_id": "INC-399C87D6",
+    "service": "faulty-project",
+    "metric": "error_rate_per_sec",
+    "issue_type": "application_error",
+    "summary": "[New] faulty-project - application_error in local",
+    "resolution": "No known resolution. Apply suggested runbook actions in dev and validate.",
     "runbook_actions": [
-      "Check p95/p99 latency breakdown by endpoint in APM.",
-      "Scale service replicas by +1 in dev and verify latency trend.",
-      "Temporarily increase upstream timeout by 10-15% in dev config."
+      "Inspect recent deployment diff and rollback candidate changes in dev.",
+      "Enable safe-mode feature flags for failing module.",
+      "Validate error-rate drop after config toggle in dev."
     ],
-    "created_at": "2026-03-04T18:09:50.297542Z"
+    "created_at": "2026-03-30T16:02:41.821492Z"
   },
   {
-    "incident_id": "INC-25965B59",
-    "service": "payments-service",
-    "metric": "latency_p99_ms",
-    "issue_type": "performance_degradation",
-    "summary": "[New] payments-service - performance_degradation in prod",
-    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
+    "incident_id": "INC-F582A9FE",
+    "service": "faulty-project",
+    "metric": "error_rate_per_sec",
+    "issue_type": "application_error",
+    "summary": "[Recurring] faulty-project - application_error in local",
+    "resolution": "No known resolution. Apply suggested runbook actions in dev and validate.",
     "runbook_actions": [
-      "Check p95/p99 latency breakdown by endpoint in APM.",
-      "Scale service replicas by +1 in dev and verify latency trend.",
-      "Temporarily increase upstream timeout by 10-15% in dev config."
+      "Inspect recent deployment diff and rollback candidate changes in dev.",
+      "Enable safe-mode feature flags for failing module.",
+      "Validate error-rate drop after config toggle in dev."
     ],
-    "created_at": "2026-03-04T18:19:33.330903Z"
+    "created_at": "2026-03-30T16:04:26.922785Z"
   },
   {
-    "incident_id": "INC-4AF208CE",
-    "service": "payments-service",
-    "metric": "latency_p99_ms",
-    "issue_type": "performance_degradation",
-    "summary": "[New] payments-service - performance_degradation in prod",
-    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
+    "incident_id": "INC-8F93A4D3",
+    "service": "faulty-project",
+    "metric": "error_rate_per_sec",
+    "issue_type": "application_error",
+    "summary": "[Recurring] faulty-project - application_error in local",
+    "resolution": "No known resolution. Apply suggested runbook actions in dev and validate.",
     "runbook_actions": [
-      "Check p95/p99 latency breakdown by endpoint in APM.",
-      "Scale service replicas by +1 in dev and verify latency trend.",
-      "Temporarily increase upstream timeout by 10-15% in dev config."
+      "Inspect recent deployment diff and rollback candidate changes in dev.",
+      "Enable safe-mode feature flags for failing module.",
+      "Validate error-rate drop after config toggle in dev."
     ],
-    "created_at": "2026-03-04T18:24:54.815532Z"
+    "created_at": "2026-03-30T16:05:11.952493Z"
   },
   {
-    "incident_id": "INC-B68906A9",
-    "service": "payments-service",
-    "metric": "latency_p99_ms",
-    "issue_type": "performance_degradation",
-    "summary": "[New] payments-service - performance_degradation in prod",
-    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
+    "incident_id": "INC-12E460B3",
+    "service": "faulty-project",
+    "metric": "error_rate_per_sec",
+    "issue_type": "application_error",
+    "summary": "[Recurring] faulty-project - application_error in local",
+    "resolution": "No known resolution. Apply suggested runbook actions in dev and validate.",
     "runbook_actions": [
-      "Check p95/p99 latency breakdown by endpoint in APM.",
-      "Scale service replicas by +1 in dev and verify latency trend.",
-      "Temporarily increase upstream timeout by 10-15% in dev config."
+      "Inspect recent deployment diff and rollback candidate changes in dev.",
+      "Enable safe-mode feature flags for failing module.",
+      "Validate error-rate drop after config toggle in dev."
     ],
-    "created_at": "2026-03-04T18:40:26.023460Z"
+    "created_at": "2026-03-30T16:06:57.051375Z"
   },
   {
-    "incident_id": "INC-DF1AEB21",
-    "service": "payments-service",
-    "metric": "latency_p99_ms",
-    "issue_type": "performance_degradation",
-    "summary": "[New] payments-service - performance_degradation in prod",
-    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
+    "incident_id": "INC-23944660",
+    "service": "faulty-project",
+    "metric": "error_rate_per_sec",
+    "issue_type": "application_error",
+    "summary": "[Recurring] faulty-project - application_error in local",
+    "resolution": "No known resolution. Apply suggested runbook actions in dev and validate.",
     "runbook_actions": [
-      "Check p95/p99 latency breakdown by endpoint in APM.",
-      "Scale service replicas by +1 in dev and verify latency trend.",
-      "Temporarily increase upstream timeout by 10-15% in dev config."
+      "Inspect recent deployment diff and rollback candidate changes in dev.",
+      "Enable safe-mode feature flags for failing module.",
+      "Validate error-rate drop after config toggle in dev."
     ],
-    "created_at": "2026-03-12T17:45:33.531485Z"
+    "created_at": "2026-03-30T16:09:42.296423Z"
   },
   {
-    "incident_id": "INC-123E4FF2",
-    "service": "payments-service",
-    "metric": "latency_p99_ms",
-    "issue_type": "performance_degradation",
-    "summary": "[New] payments-service - performance_degradation in prod",
-    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
+    "incident_id": "INC-466170E8",
+    "service": "faulty-project",
+    "metric": "error_rate_per_sec",
+    "issue_type": "application_error",
+    "summary": "[Recurring] faulty-project - application_error in local",
+    "resolution": "No known resolution. Apply suggested runbook actions in dev and validate.",
     "runbook_actions": [
-      "Check p95/p99 latency breakdown by endpoint in APM.",
-      "Scale service replicas by +1 in dev and verify latency trend.",
-      "Temporarily increase upstream timeout by 10-15% in dev config."
+      "Inspect recent deployment diff and rollback candidate changes in dev.",
+      "Enable safe-mode feature flags for failing module.",
+      "Validate error-rate drop after config toggle in dev."
     ],
-    "created_at": "2026-03-12T17:45:33.946933Z"
+    "created_at": "2026-03-30T16:13:27.545897Z"
   },
   {
-    "incident_id": "INC-FE5A9133",
-    "service": "payments-service",
-    "metric": "latency_p99_ms",
-    "issue_type": "performance_degradation",
-    "summary": "[Recurring] payments-service - performance_degradation in prod",
-    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
+    "incident_id": "INC-BF3CCEA9",
+    "service": "faulty-project",
+    "metric": "error_rate_per_sec",
+    "issue_type": "application_error",
+    "summary": "[Recurring] faulty-project - application_error in local",
+    "resolution": "No known resolution. Apply suggested runbook actions in dev and validate.",
     "runbook_actions": [
-      "Check p95/p99 latency breakdown by endpoint in APM.",
-      "Scale service replicas by +1 in dev and verify latency trend.",
-      "Temporarily increase upstream timeout by 10-15% in dev config."
+      "Inspect recent deployment diff and rollback candidate changes in dev.",
+      "Enable safe-mode feature flags for failing module.",
+      "Validate error-rate drop after config toggle in dev."
     ],
-    "created_at": "2026-03-12T17:45:34.391206Z"
+    "created_at": "2026-03-30T16:15:42.679418Z"
   },
   {
-    "incident_id": "INC-0CA7B769",
-    "service": "payments-service",
-    "metric": "latency_p99_ms",
-    "issue_type": "performance_degradation",
-    "summary": "[Recurring] payments-service - performance_degradation in prod",
-    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
+    "incident_id": "INC-7FD8659B",
+    "service": "faulty-project",
+    "metric": "error_rate_per_sec",
+    "issue_type": "application_error",
+    "summary": "[Recurring] faulty-project - application_error in local",
+    "resolution": "No known resolution. Apply suggested runbook actions in dev and validate.",
     "runbook_actions": [
-      "Check p95/p99 latency breakdown by endpoint in APM.",
-      "Scale service replicas by +1 in dev and verify latency trend.",
-      "Temporarily increase upstream timeout by 10-15% in dev config."
+      "Inspect recent deployment diff and rollback candidate changes in dev.",
+      "Enable safe-mode feature flags for failing module.",
+      "Validate error-rate drop after config toggle in dev."
     ],
-    "created_at": "2026-03-12T17:45:35.451333Z"
+    "created_at": "2026-03-30T16:17:57.784525Z"
   },
   {
-    "incident_id": "INC-DF3834BF",
-    "service": "payments-service",
-    "metric": "latency_p99_ms",
-    "issue_type": "performance_degradation",
-    "summary": "[Recurring] payments-service - performance_degradation in prod",
-    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
+    "incident_id": "INC-8148E3EC",
+    "service": "faulty-project",
+    "metric": "error_rate_per_sec",
+    "issue_type": "application_error",
+    "summary": "[Recurring] faulty-project - application_error in local",
+    "resolution": "No known resolution. Apply suggested runbook actions in dev and validate.",
     "runbook_actions": [
-      "Check p95/p99 latency breakdown by endpoint in APM.",
-      "Scale service replicas by +1 in dev and verify latency trend.",
-      "Temporarily increase upstream timeout by 10-15% in dev config."
+      "Inspect recent deployment diff and rollback candidate changes in dev.",
+      "Enable safe-mode feature flags for failing module.",
+      "Validate error-rate drop after config toggle in dev."
     ],
-    "created_at": "2026-03-12T17:45:36.445241Z"
+    "created_at": "2026-03-30T16:20:27.936404Z"
   },
   {
-    "incident_id": "INC-90811A15",
-    "service": "payments-service",
-    "metric": "latency_p99_ms",
-    "issue_type": "performance_degradation",
-    "summary": "[Recurring] payments-service - performance_degradation in prod",
-    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
+    "incident_id": "INC-428DB1E8",
+    "service": "faulty-project",
+    "metric": "error_rate_per_sec",
+    "issue_type": "application_error",
+    "summary": "[Recurring] faulty-project - application_error in local",
+    "resolution": "No known resolution. Apply suggested runbook actions in dev and validate.",
     "runbook_actions": [
-      "Check p95/p99 latency breakdown by endpoint in APM.",
-      "Scale service replicas by +1 in dev and verify latency trend.",
-      "Temporarily increase upstream timeout by 10-15% in dev config."
+      "Inspect recent deployment diff and rollback candidate changes in dev.",
+      "Enable safe-mode feature flags for failing module.",
+      "Validate error-rate drop after config toggle in dev."
     ],
-    "created_at": "2026-03-12T17:45:36.932421Z"
-  },
-  {
-    "incident_id": "INC-B32B4178",
-    "service": "payments-service",
-    "metric": "latency_p99_ms",
-    "issue_type": "performance_degradation",
-    "summary": "[Recurring] payments-service - performance_degradation in prod",
-    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
-    "runbook_actions": [
-      "Check p95/p99 latency breakdown by endpoint in APM.",
-      "Scale service replicas by +1 in dev and verify latency trend.",
-      "Temporarily increase upstream timeout by 10-15% in dev config."
-    ],
-    "created_at": "2026-03-12T17:45:37.290617Z"
-  },
-  {
-    "incident_id": "INC-0561C56A",
-    "service": "payments-service",
-    "metric": "latency_p99_ms",
-    "issue_type": "performance_degradation",
-    "summary": "[New] payments-service - performance_degradation in prod",
-    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
-    "runbook_actions": [
-      "Check p95/p99 latency breakdown by endpoint in APM.",
-      "Scale service replicas by +1 in dev and verify latency trend.",
-      "Temporarily increase upstream timeout by 10-15% in dev config."
-    ],
-    "created_at": "2026-03-12T18:06:23.803103Z"
-  },
-  {
-    "incident_id": "INC-42C402EC",
-    "service": "payments-service",
-    "metric": "latency_p99_ms",
-    "issue_type": "performance_degradation",
-    "summary": "[New] payments-service - performance_degradation in prod",
-    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
-    "runbook_actions": [
-      "Check p95/p99 latency breakdown by endpoint in APM.",
-      "Scale service replicas by +1 in dev and verify latency trend.",
-      "Temporarily increase upstream timeout by 10-15% in dev config."
-    ],
-    "created_at": "2026-03-12T18:10:37.108722Z"
-  },
-  {
-    "incident_id": "INC-C3756984",
-    "service": "payments-service",
-    "metric": "latency_p99_ms",
-    "issue_type": "performance_degradation",
-    "summary": "[New] payments-service - performance_degradation in prod",
-    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
-    "runbook_actions": [
-      "Check p95/p99 latency breakdown by endpoint in APM.",
-      "Scale service replicas by +1 in dev and verify latency trend.",
-      "Temporarily increase upstream timeout by 10-15% in dev config."
-    ],
-    "created_at": "2026-03-12T18:13:40.914183Z"
-  },
-  {
-    "incident_id": "INC-914C719E",
-    "service": "payments-service",
-    "metric": "latency_p99_ms",
-    "issue_type": "performance_degradation",
-    "summary": "[New] payments-service - performance_degradation in prod",
-    "resolution": "Scaled replicas from 3 to 5 and adjusted timeout in gateway config.",
-    "runbook_actions": [
-      "Check p95/p99 latency breakdown by endpoint in APM.",
-      "Scale service replicas by +1 in dev and verify latency trend.",
-      "Temporarily increase upstream timeout by 10-15% in dev config."
-    ],
-    "created_at": "2026-03-12T18:30:02.792111Z"
+    "created_at": "2026-03-30T16:22:13.069438Z"
   }
 ]

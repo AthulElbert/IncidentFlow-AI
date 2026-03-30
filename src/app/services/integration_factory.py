@@ -1,4 +1,7 @@
+from pathlib import Path
+
 from app.adapters.apm_client import HttpAPMClient, MockAPMClient
+from app.adapters.apm_alert_source import DynatraceAPMAlertSource, HttpAPMAlertSource, MockAPMAlertSource
 from app.adapters.jenkins_client import MockJenkinsClient, RealJenkinsClient
 from app.adapters.jira_client import MockJiraClient, RealJiraClient
 from app.adapters.llm_client import OpenAICompatibleLLMClient
@@ -58,6 +61,34 @@ def build_apm_client(settings: Settings):
             return MockAPMClient(), "mock-fallback-startup"
 
     return MockAPMClient(), "mock"
+
+
+def build_apm_alert_source(settings: Settings, base_dir: str):
+    if settings.apm_alerts_mode == "dynatrace":
+        try:
+            return DynatraceAPMAlertSource(
+                base_url=settings.apm_alerts_base_url,
+                api_token=settings.apm_alerts_dynatrace_token,
+                timeout_seconds=settings.apm_alerts_timeout_seconds,
+                verify_ssl=settings.apm_verify_ssl,
+            ), "dynatrace"
+        except Exception:
+            queue_path = str(Path(base_dir) / settings.apm_alert_queue_file)
+            return MockAPMAlertSource(queue_file=queue_path), "mock-fallback-startup"
+
+    if settings.apm_alerts_mode == "http":
+        try:
+            return HttpAPMAlertSource(
+                base_url=settings.apm_alerts_base_url,
+                timeout_seconds=settings.apm_alerts_timeout_seconds,
+                verify_ssl=settings.apm_verify_ssl,
+            ), "http"
+        except Exception:
+            queue_path = str(Path(base_dir) / settings.apm_alert_queue_file)
+            return MockAPMAlertSource(queue_file=queue_path), "mock-fallback-startup"
+
+    queue_path = str(Path(base_dir) / settings.apm_alert_queue_file)
+    return MockAPMAlertSource(queue_file=queue_path), "mock"
 
 
 def build_llm_client(settings: Settings):

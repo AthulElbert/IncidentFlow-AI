@@ -1,0 +1,60 @@
+services:
+  faulty-project:
+    build:
+      context: ../faulty_project
+      dockerfile: Dockerfile
+    container_name: local-apm-faulty-project
+    ports:
+      - "8010:8010"
+
+  sample-app:
+    build:
+      context: ./sample_app
+      dockerfile: Dockerfile
+    container_name: local-apm-sample-app
+    ports:
+      - "8001:8001"
+
+  alert-bridge:
+    build:
+      context: ./alert_bridge
+      dockerfile: Dockerfile
+    container_name: local-apm-alert-bridge
+    ports:
+      - "8085:8085"
+
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    container_name: local-apm-prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+    depends_on:
+      - faulty-project
+      - sample-app
+      - alert-bridge
+    ports:
+      - "9090:9090"
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: local-apm-alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "9093:9093"
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: local-apm-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    depends_on:
+      - prometheus

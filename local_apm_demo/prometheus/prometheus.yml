@@ -1,0 +1,22 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  - job_name: "faulty-project"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["faulty-project:8010"]
+
+  - job_name: "sample-app"
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["sample-app:8001"]
