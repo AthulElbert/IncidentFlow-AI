@@ -11,6 +11,12 @@ def test_prepare_pr_endpoint_flow(monkeypatch):
     monkeypatch.setenv("RELEASE_OPERATOR_API_KEY", "release-key")
     monkeypatch.setenv("PR_MODE", "mock")
     monkeypatch.setenv("TEST_EVIDENCE_MODE", "mock")
+    # Pin these explicitly so the test doesn't silently depend on whatever the
+    # real .env currently has (e.g. sandbox_git/llm for a live demo) -- without
+    # this, the test can flip outcomes or make real network calls to an LLM.
+    monkeypatch.setenv("TRIAGE_MODE", "heuristic")
+    monkeypatch.setenv("CODE_CHANGE_MODE", "spec")
+    monkeypatch.setenv("CODE_FIX_MODE", "template")
 
     import app.main as main_module
 

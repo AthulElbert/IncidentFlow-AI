@@ -53,9 +53,19 @@ class TriageAgent:
             warnings=warnings,
         )
 
-    def triage(self, event: APMEvent) -> TriageResult:
-        if self.mode != "llm" or self.llm_client is None:
+    def triage(self, event: APMEvent, mode_override: str | None = None) -> TriageResult:
+        effective_mode = (mode_override or self.mode or "").strip().lower()
+        if effective_mode not in {"heuristic", "llm"}:
+            effective_mode = self.mode
+
+        if effective_mode != "llm":
             return self._heuristic(event)
+
+        if self.llm_client is None:
+            return self._heuristic(
+                event,
+                warning="LLM triage requested but no LLM client is configured; used heuristic fallback.",
+            )
 
         try:
             raw = self.llm_client.triage(event)

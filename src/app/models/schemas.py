@@ -4,6 +4,16 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 
+# Jenkins states that mean "no verdict yet"; polling continues while a build is in one.
+NON_TERMINAL_BUILD_STATES = frozenset({"QUEUED", "RUNNING", "IN_PROGRESS"})
+# States that must never satisfy a production gate.
+UNSAFE_BUILD_STATES_FOR_PROD = NON_TERMINAL_BUILD_STATES | {"UNKNOWN"}
+
+
+def is_non_terminal_build_status(status: str | None) -> bool:
+    return (status or "").upper() in NON_TERMINAL_BUILD_STATES
+
+
 class APMEvent(BaseModel):
     service: str
     metric: str
@@ -59,8 +69,10 @@ class ChangeRecord(BaseModel):
     service: str
     environment: str
     summary: str
-    jira_key: str
+    jira_key: str | None = None
+    jira_sync_status: Literal["synced", "pending_retry"] = "synced"
     jenkins_job_url: str
+    version: int = 1
     proposed_actions: list[str] = Field(default_factory=list)
     triage_mode_used: str = "heuristic"
     triage_hypothesis_steps: list[str] = Field(default_factory=list)
@@ -105,6 +117,7 @@ class ChangeRecord(BaseModel):
         "blocked_by_policy",
         "dev_fix_failed",
         "closed_rejected",
+        "promoting",
         "promoted_to_prod",
         "prod_promotion_failed",
     ] = "awaiting_dev_execution"
@@ -118,6 +131,7 @@ class ChangeRecord(BaseModel):
     promotion_comment: str | None = None
     promotion_result: Literal["queued", "success", "failed"] | None = None
     prod_deploy_url: str | None = None
+    promotion_key: str | None = None
 
 
 class ApprovalDecisionRequest(BaseModel):
@@ -178,7 +192,7 @@ class PromoteResponse(BaseModel):
     deployment_state: str
     promotion_result: str
     promoted_by: str
-    promoted_at: datetime
+    promoted_at: datetime | None = None
     prod_deploy_url: str
 
 
@@ -190,7 +204,7 @@ class IncidentResponse(BaseModel):
     probable_cause: str
     suggested_actions: list[str]
     similar_incidents: list[SimilarIncident] = Field(default_factory=list)
-    jira_ticket: JiraTicket
+    jira_ticket: JiraTicket | None = None
     jenkins_validation: JenkinsBuildResult
     metadata: dict[str, Any] = Field(default_factory=dict)
 

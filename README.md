@@ -118,13 +118,17 @@ Key settings groups:
   - `APM_ALERTS_BASE_URL`, `APM_ALERTS_TIMEOUT_SECONDS`
   - `APM_ALERTS_DYNATRACE_TOKEN` (required for dynatrace mode)
   - `APM_ALERT_QUEUE_FILE`
-  - `AUTO_REMEDIATION_MODE`: `assistive` | `safe_auto` | `full_auto`
-  - `SAFE_AUTO_ISSUE_TYPES`
-  - `AUTO_PROMOTE_ON_POLICY_PASS`
+  - The scheduler is intake-only: it creates incidents and change records. It never approves, deploys or promotes.
 - Policy:
   - `MIN_CONFIDENCE_FOR_PROD`
   - `REQUIRE_ZERO_WARNINGS_FOR_PROD`
-  - `ALLOWED_JENKINS_STATES_FOR_PROD`
+  - `ALLOWED_JENKINS_STATES_FOR_PROD` (terminal success states only, default `SUCCESS`; `QUEUED`/`RUNNING`/`UNKNOWN` fail startup)
+  - `ENFORCE_SEPARATION_OF_DUTIES` (approver cannot also promote)
+- Jenkins build tracking:
+  - `JENKINS_BUILD_WAIT_SECONDS`, `JENKINS_POLL_INTERVAL_SECONDS`
+  - `MOCK_JENKINS_POLLS`, `MOCK_JENKINS_OUTCOME` (simulated builds: `RUNNING` for N polls, then `success`/`failure`)
+- Failure behavior:
+  - `ALLOW_MOCK_FALLBACK` (default `false`): a `real` integration that cannot start fails startup instead of silently becoming a simulator
 - Auth:
   - `AUTH_MODE`: `api_key` | `jwt` | `hybrid`
   - API keys or JWT settings
@@ -154,8 +158,9 @@ Open:
 - `GET /v1/metrics/summary`
 - `POST /v1/changes/{change_id}/prepare-pr`
 - `POST /v1/changes/{change_id}/execute-dev`
+- `POST /v1/changes/{change_id}/refresh-status` (resolve a dev build or prod deploy that was still running)
 - `POST /v1/changes/{change_id}/decision`
-- `POST /v1/changes/{change_id}/promote`
+- `POST /v1/changes/{change_id}/promote` (reserves the promotion first; only a confirmed Jenkins `SUCCESS` becomes `promoted_to_prod`)
 
 ## Typical Workflow
 
@@ -283,7 +288,11 @@ $env:PYTHONPATH = "C:\Personal_projects\Agentic_AI_Projects\src"
 
 ## Safety and Governance
 
-- Assistive autonomy, human-controlled release decisions
+- Assistive autonomy only: no automatic approval or production promotion
+- A person who approves a change cannot promote it
+- Promotion is validated and reserved (`promoting`) before any Jenkins call; a still-running deploy is never recorded as promoted
+- Failed Jira/Jenkins calls are recorded as failed (no simulated tickets or builds) and block the change from production
+- Writes are versioned per record (Postgres) and atomic (JSON)
 - Policy gate before `ready_for_prod`
 - Role-protected production promotion
 - Structured audit fields in change records

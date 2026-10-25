@@ -17,20 +17,21 @@ class BrokenJenkinsClient:
         raise RuntimeError("jenkins down")
 
 
-def test_pipeline_runtime_fallbacks(tmp_path):
+def test_failed_integrations_are_recorded_as_failed_not_simulated(tmp_path):
     kb_file = tmp_path / "incident_history.json"
     kb_file.write_text(json.dumps([]), encoding="utf-8")
 
     change_file = tmp_path / "change_records.json"
     change_file.write_text(json.dumps([]), encoding="utf-8")
 
+    store = ChangeControlStore(str(change_file))
     pipeline = SupportAgentPipeline(
         kb_file=str(kb_file),
         jira_client=BrokenJiraClient(),
         jenkins_client=BrokenJenkinsClient(),
         jira_mode="real",
         jenkins_mode="real",
-        change_store=ChangeControlStore(str(change_file)),
+        change_store=store,
         triage_agent=TriageAgent(mode="heuristic"),
     )
 
@@ -46,11 +47,21 @@ def test_pipeline_runtime_fallbacks(tmp_path):
 
     resp = pipeline.process_event(event)
 
-    assert resp.metadata["jira_mode"] == "mock-fallback"
-    assert resp.metadata["jenkins_mode"] == "mock-fallback"
-    assert resp.metadata["triage_mode"] == "heuristic"
+    # No fabricated ticket or build: the response says plainly that both failed.
+    assert resp.jira_ticket is None
+    assert resp.jenkins_validation.status == "UNKNOWN"
+    assert resp.jenkins_validation.url == ""
+    assert resp.metadata["jira_mode"] == "failed"
+    assert resp.metadata["jenkins_mode"] == "failed"
     assert len(resp.metadata["warnings"]) == 2
-    assert resp.jira_ticket.key.startswith("SUP-")
-    assert resp.jenkins_validation.status == "QUEUED"
+    assert resp.metadata["triage_mode"] == "heuristic"
     assert resp.metadata["approval_required"] is True
-    assert resp.metadata["change_id"].startswith("CHG-")
+
+    change = store.get_change(resp.metadata["change_id"])
+    assert change.jira_key is None
+    assert change.jira_sync_status == "pending_retry"
+    assert change.jenkins_status == "UNKNOWN"
+    assert change.warning_count == 2
+    # The failures keep the change away from production.
+    assert any("warning_count" in reason for reason in change.policy_reasons)
+    assert any("jenkins_status UNKNOWN" in reason for reason in change.policy_reasons)

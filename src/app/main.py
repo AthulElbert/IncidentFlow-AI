@@ -1,12 +1,14 @@
 import json
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 
-from app.config import load_settings
+from app.adapters.jenkins_client import wait_for_build
+from app.config import load_settings, validate_settings
 from app.logging_config import setup_logging
 from app.models.schemas import (
     APMEvent,
@@ -23,7 +25,9 @@ from app.models.schemas import (
     PromoteResponse,
 )
 from app.security import AuthManager, Principal
-from app.services.change_control import ChangeControlStore, PolicyConfig
+from app.services.build_tracker import BuildTracker, promotion_result_for_status
+from app.services.change_control import ChangeControlStore, ConcurrentModificationError, PolicyConfig
+from app.services.code_fix_agent import CodeFixAgent
 from app.services.dev_fix_executor import DevFixExecutor
 from app.services.integration_factory import (
     build_apm_alert_source,
@@ -38,22 +42,28 @@ from app.services.pipeline import SupportAgentPipeline
 from app.services.pr_preparer import PRPreparationService
 from app.services.scheduler import AlertDedupStore, IncidentScheduler
 from app.services.triage_agent import TriageAgent
+from app.storage import atomic_write_text
 
 app = FastAPI(title="Production Support Agent MVP", version="0.11.0")
 
 base_dir = Path(__file__).resolve().parents[2]
 settings = load_settings(str(base_dir))
+validate_settings(settings)
 setup_logging(settings.log_level)
 logger = logging.getLogger("app.main")
 
-kb_path = str(base_dir / "data" / "incident_history.json")
-change_path = str(base_dir / "data" / "change_records.json")
+data_dir = base_dir / settings.data_dir
+kb_path = str(data_dir / "incident_history.json")
+change_path = str(data_dir / "change_records.json")
 change_store = ChangeControlStore(
     change_path,
     policy=PolicyConfig(
         min_confidence_for_prod=settings.min_confidence_for_prod,
         require_zero_warnings_for_prod=settings.require_zero_warnings_for_prod,
         allowed_jenkins_states_for_prod=settings.allowed_jenkins_states_for_prod,
+        # With auth disabled every request is the same synthetic actor, so a
+        # two-person rule cannot be enforced.
+        enforce_separation_of_duties=settings.enforce_separation_of_duties and settings.auth_enabled,
     ),
     storage_backend=settings.storage_backend,
     database_url=settings.database_url,
@@ -75,6 +85,18 @@ dev_executor = DevFixExecutor(
     apm_client=apm_client,
     min_apm_improvement_pct=settings.dev_min_apm_improvement_pct,
     require_smoke_tests=settings.require_dev_smoke_tests,
+    build_wait_seconds=settings.jenkins_build_wait_seconds,
+    poll_interval_seconds=settings.jenkins_poll_interval_seconds,
+)
+build_tracker = BuildTracker(
+    change_store=change_store,
+    jenkins_client=jenkins_client,
+    dev_executor=dev_executor,
+)
+code_fix_agent = CodeFixAgent(
+    llm_client=llm_client,
+    max_latency_ms=settings.code_fix_max_latency_ms,
+    max_error_probability=settings.code_fix_max_error_probability,
 )
 pr_preparer = PRPreparationService(
     pr_client=pr_client,
@@ -90,6 +112,9 @@ pr_preparer = PRPreparationService(
     code_change_max_lines=settings.code_change_max_lines,
     code_change_auto_commit=settings.code_change_auto_commit,
     code_change_auto_push=settings.code_change_auto_push,
+    code_fix_mode=settings.code_fix_mode,
+    code_fix_target_path=settings.code_fix_target_path,
+    code_fix_agent=code_fix_agent,
 )
 
 pipeline = SupportAgentPipeline(
@@ -109,18 +134,8 @@ alert_dedup_store = AlertDedupStore(file_path=scheduler_dedup_path)
 scheduler = IncidentScheduler(
     alert_source=apm_alert_source,
     pipeline=pipeline,
-    change_store=change_store,
-    pr_preparer=pr_preparer,
-    dev_executor=dev_executor,
-    jenkins_client=jenkins_client,
     dedup_store=alert_dedup_store,
     poll_interval_seconds=settings.apm_poll_interval_seconds,
-    auto_remediation_mode=settings.auto_remediation_mode,
-    safe_auto_issue_types=settings.safe_auto_issue_types,
-    auto_promote_on_policy_pass=settings.auto_promote_on_policy_pass,
-    scheduler_actor=settings.scheduler_actor,
-    scheduler_approver_actor=settings.scheduler_approver_actor,
-    scheduler_release_actor=settings.scheduler_release_actor,
 )
 
 auth = AuthManager(
@@ -151,11 +166,11 @@ logger.info(
         "apm_mode": apm_mode,
         "apm_alerts_mode": apm_alerts_mode,
         "apm_poll_mode": settings.apm_poll_mode,
-        "auto_remediation_mode": settings.auto_remediation_mode,
         "triage_mode": triage_mode,
         "pr_mode": pr_mode,
         "pr_local_branch_mode": settings.pr_local_branch_mode,
         "code_change_mode": settings.code_change_mode,
+        "code_fix_mode": settings.code_fix_mode,
         "log_level": settings.log_level,
         "storage_backend": settings.storage_backend,
         "min_confidence_for_prod": settings.min_confidence_for_prod,
@@ -164,13 +179,20 @@ logger.info(
     },
 )
 
-if settings.apm_poll_mode == "poll":
-    scheduler.start()
-
-
-@app.on_event("shutdown")
-def shutdown_scheduler() -> None:
+@asynccontextmanager
+async def _lifespan(_: FastAPI):
+    if settings.apm_poll_mode == "poll":
+        scheduler.start()
+    yield
     scheduler.stop()
+
+
+app.router.lifespan_context = _lifespan
+
+
+@app.exception_handler(ConcurrentModificationError)
+def _concurrent_modification_handler(_, exc: ConcurrentModificationError) -> JSONResponse:
+    return JSONResponse(status_code=409, content={"detail": str(exc)})
 
 
 @app.get("/health")
@@ -182,7 +204,6 @@ def health(principal: Principal = Depends(viewer_auth)) -> dict[str, str]:
         "apm_mode": apm_mode,
         "apm_alerts_mode": apm_alerts_mode,
         "apm_poll_mode": settings.apm_poll_mode,
-        "auto_remediation_mode": settings.auto_remediation_mode,
         "triage_mode": triage_mode,
         "pr_mode": pr_mode,
         "pr_local_branch_mode": settings.pr_local_branch_mode,
@@ -238,18 +259,25 @@ def enqueue_mock_alert(event: APMEvent, source_alert_id: str | None = None, prin
             "message": event.message,
         }
     )
-    queue_path.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+    atomic_write_text(queue_path, json.dumps(raw, indent=2))
     return {"status": "queued", "source_alert_id": alert_id, "queue_file": str(queue_path)}
 
 
 @app.post("/v1/incidents/process", response_model=IncidentResponse)
-def process_incident(event: APMEvent, principal: Principal = Depends(viewer_auth)) -> IncidentResponse:
+def process_incident(
+    event: APMEvent,
+    triage_mode: str | None = Query(default=None, pattern="^(heuristic|llm)$"),
+    principal: Principal = Depends(viewer_auth),
+) -> IncidentResponse:
     _ = principal
-    return pipeline.process_event(event)
+    return pipeline.process_event(event, triage_mode_override=triage_mode)
 
 
 @app.post("/v1/incidents/mock", response_model=IncidentResponse)
-def process_mock_incident(principal: Principal = Depends(viewer_auth)) -> IncidentResponse:
+def process_mock_incident(
+    triage_mode: str | None = Query(default=None, pattern="^(heuristic|llm)$"),
+    principal: Principal = Depends(viewer_auth),
+) -> IncidentResponse:
     _ = principal
     sample = APMEvent(
         service="payments-service",
@@ -260,7 +288,7 @@ def process_mock_incident(principal: Principal = Depends(viewer_auth)) -> Incide
         timestamp=datetime.now(timezone.utc),
         message="High latency observed in checkout endpoint",
     )
-    return pipeline.process_event(sample)
+    return pipeline.process_event(sample, triage_mode_override=triage_mode)
 
 
 @app.get("/v1/changes", response_model=list[ChangeRecord])
@@ -294,11 +322,10 @@ def execute_dev_fix(
     payload: DevExecuteRequest,
     principal: Principal = Depends(approver_auth),
 ) -> DevExecuteResponse:
-    record = change_store.get_change(change_id)
-    if not record:
-        raise HTTPException(status_code=404, detail="Change not found")
-
     try:
+        # Validate before triggering anything: a Jenkins build must not start for a change
+        # that is already decided, promoting, or has a dev build in flight.
+        record = change_store.ensure_dev_executable(change_id)
         exec_url, jenkins_status, apm_improvement, smoke_ok, validation_passed, notes = dev_executor.execute(record)
         updated = change_store.record_dev_execution(
             change_id=change_id,
@@ -325,6 +352,22 @@ def execute_dev_fix(
         dev_execution_url=updated.dev_execution_url or "",
         validation_passed=updated.dev_execution_status == "passed",
     )
+
+
+@app.post("/v1/changes/{change_id}/refresh-status", response_model=ChangeRecord)
+def refresh_build_status(change_id: str, principal: Principal = Depends(approver_auth)) -> ChangeRecord:
+    """Poll Jenkins for a dev build or prod deploy that was still running when last checked."""
+    try:
+        return build_tracker.refresh(change_id, actor=principal.actor)
+    except ValueError as exc:
+        msg = str(exc)
+        if msg == "Change not found":
+            raise HTTPException(status_code=404, detail=msg) from exc
+        raise HTTPException(status_code=400, detail=msg) from exc
+    except ConcurrentModificationError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Status refresh failed: {exc}") from exc
 
 
 @app.post("/v1/changes/{change_id}/prepare-pr", response_model=PRPrepareResponse)
@@ -420,42 +463,50 @@ def promote_change(
     payload: PromoteRequest,
     principal: Principal = Depends(release_auth),
 ) -> PromoteResponse:
-    record = change_store.get_change(change_id)
-    if not record:
-        raise HTTPException(status_code=404, detail="Change not found")
-
+    # 1. Validate and reserve the promotion. Nothing external has happened yet, so an
+    #    unapproved, rejected, blocked, already-promoting or same-actor request ends here
+    #    without a deploy ever being triggered.
     try:
-        prod_build = jenkins_client.trigger_prod_deploy(service=record.service, change_id=change_id)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Failed to trigger Jenkins prod deploy: {exc}") from exc
-
-    status = (prod_build.status or "UNKNOWN").upper()
-    if status in {"SUCCESS"}:
-        promotion_result = "success"
-    elif status in {"QUEUED", "RUNNING", "IN_PROGRESS"}:
-        promotion_result = "queued"
-    else:
-        promotion_result = "failed"
-
-    try:
-        updated = change_store.promote_change(
-            change_id=change_id,
-            payload=payload,
-            promoted_by=principal.actor,
-            promotion_result=promotion_result,
-            prod_deploy_url=prod_build.url,
-        )
+        reserved = change_store.begin_promotion(change_id, payload, promoted_by=principal.actor)
     except ValueError as exc:
         message = str(exc)
         if message == "Change not found":
             raise HTTPException(status_code=404, detail=message) from exc
         raise HTTPException(status_code=400, detail=message) from exc
+    except ConcurrentModificationError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    # 2. Trigger the deploy. A failure here is recorded, never left stuck in `promoting`.
+    try:
+        prod_build = jenkins_client.trigger_prod_deploy(service=reserved.service, change_id=change_id)
+    except Exception as exc:
+        change_store.finalize_promotion(change_id, "failed", "", note=f"deploy trigger failed: {exc}")
+        raise HTTPException(status_code=502, detail=f"Failed to trigger Jenkins prod deploy: {exc}") from exc
+
+    # 3. Give the build a bounded chance to finish. If polling itself fails or the build is
+    #    still running, the change stays `promoting` until refresh-status confirms it.
+    try:
+        prod_build = wait_for_build(
+            jenkins_client,
+            prod_build,
+            settings.jenkins_build_wait_seconds,
+            settings.jenkins_poll_interval_seconds,
+        )
+    except Exception as exc:
+        logger.warning("prod-build-poll-failed", extra={"change_id": change_id, "error": str(exc)})
+
+    # 4. Only a confirmed SUCCESS becomes promoted_to_prod.
+    updated = change_store.finalize_promotion(
+        change_id,
+        promotion_result_for_status(prod_build.status),
+        prod_build.url,
+    )
 
     return PromoteResponse(
         change_id=updated.change_id,
         deployment_state=updated.deployment_state,
-        promotion_result=updated.promotion_result or promotion_result,
+        promotion_result=updated.promotion_result or "queued",
         promoted_by=updated.promoted_by or principal.actor,
-        promoted_at=updated.promoted_at or datetime.now(timezone.utc),
+        promoted_at=updated.promoted_at,
         prod_deploy_url=updated.prod_deploy_url or prod_build.url,
     )

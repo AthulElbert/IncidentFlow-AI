@@ -54,9 +54,10 @@ APM_POLL_MODE=poll
 APM_ALERTS_MODE=http
 APM_ALERTS_BASE_URL=http://127.0.0.1:8085
 APM_ALERTS_TIMEOUT_SECONDS=10
-AUTO_REMEDIATION_MODE=safe_auto
-SAFE_AUTO_ISSUE_TYPES=PERFORMANCE_DEGRADATION,DEPENDENCY_FAILURE
 ```
+
+The scheduler only creates incidents and change records from alerts. Prepare the PR,
+run dev validation, approve and promote from the dashboard or API.
 
 Then restart your API server.
 

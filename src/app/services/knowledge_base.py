@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from app.models.schemas import IncidentRecord, SimilarIncident
+from app.storage import atomic_write_text
 
 
 class IncidentKnowledgeBase:
@@ -29,7 +30,7 @@ class IncidentKnowledgeBase:
             return
 
         payload = [item.model_dump(mode="json") for item in self._records]
-        self.data_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        atomic_write_text(self.data_path, json.dumps(payload, indent=2))
 
     def find_similar(self, service: str, metric: str, issue_type: str, top_k: int = 3) -> list[SimilarIncident]:
         scored: list[SimilarIncident] = []

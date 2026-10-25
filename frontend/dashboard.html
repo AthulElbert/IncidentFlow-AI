@@ -15,6 +15,11 @@
       --accent-2: #1d4ed8;
       --warn: #b45309;
       --bad: #b91c1c;
+      --ok-bg: #ecfdf5;
+      --llm-bg: #eef2ff;
+      --llm-ink: #4338ca;
+      --heur-bg: #f1f5f9;
+      --heur-ink: #475569;
     }
     * { box-sizing: border-box; }
     body {
@@ -24,7 +29,7 @@
       color: var(--ink);
     }
     .wrap {
-      max-width: 1100px;
+      max-width: 1180px;
       margin: 24px auto 40px;
       padding: 0 16px;
     }
@@ -41,13 +46,35 @@
       font-size: 1.4rem;
       letter-spacing: 0.2px;
     }
+    .tagline {
+      margin: 2px 0 0;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
     .panel {
       background: var(--panel);
       border: 1px solid var(--line);
       border-radius: 14px;
-      padding: 14px;
+      padding: 16px;
       box-shadow: 0 8px 20px rgba(15, 23, 42, 0.04);
-      margin-bottom: 14px;
+      margin-bottom: 16px;
+    }
+    .section-label {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      margin-bottom: 4px;
+    }
+    .section-label .tag {
+      font-weight: 700;
+      font-size: 1rem;
+    }
+    .section-label .desc {
+      color: var(--muted);
+      font-size: 0.83rem;
+    }
+    .section-divider {
+      margin: 22px 0 10px;
     }
     .controls {
       display: grid;
@@ -55,14 +82,17 @@
       gap: 8px;
       align-items: center;
     }
-    input {
+    .controls.three { grid-template-columns: 1fr 1fr 1fr; }
+    input, textarea {
       width: 100%;
       border: 1px solid var(--line);
       border-radius: 10px;
       padding: 10px 11px;
-      font-size: 0.95rem;
+      font-size: 0.9rem;
       color: var(--ink);
+      font-family: inherit;
     }
+    textarea { resize: vertical; min-height: 40px; }
     button {
       border: 0;
       border-radius: 10px;
@@ -71,18 +101,28 @@
       background: var(--accent);
       cursor: pointer;
       font-weight: 600;
+      font-size: 0.88rem;
+      white-space: nowrap;
     }
-    button.secondary {
-      background: var(--accent-2);
+    button.secondary { background: var(--accent-2); }
+    button.warn-btn { background: var(--warn); }
+    button.bad-btn { background: var(--bad); }
+    button.ghost {
+      background: transparent;
+      color: var(--accent-2);
+      border: 1px solid var(--accent-2);
     }
-    button:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-    }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
     .status {
       margin-top: 8px;
       color: var(--muted);
-      font-size: 0.9rem;
+      font-size: 0.85rem;
+    }
+    .btn-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
     }
     .grid {
       display: grid;
@@ -95,90 +135,226 @@
       padding: 10px;
       background: linear-gradient(180deg, #ffffff, #fbfefc);
     }
-    .kpi .label {
-      font-size: 0.8rem;
-      color: var(--muted);
-      margin-bottom: 5px;
-    }
-    .kpi .value {
-      font-size: 1.2rem;
-      font-weight: 700;
-    }
+    .kpi .label { font-size: 0.8rem; color: var(--muted); margin-bottom: 5px; }
+    .kpi .value { font-size: 1.2rem; font-weight: 700; }
     .kpi.warn .value { color: var(--warn); }
     .kpi.bad .value { color: var(--bad); }
-    .bars {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
-    }
-    .bar-group h3 {
-      font-size: 0.95rem;
-      margin: 0 0 8px;
-    }
-    .bar-row {
-      margin: 8px 0;
-    }
+    .bars { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .bar-group h3 { font-size: 0.92rem; margin: 0 0 8px; }
+    .bar-row { margin: 8px 0; }
     .bar-meta {
+      display: flex; justify-content: space-between;
+      font-size: 0.8rem; color: var(--muted); margin-bottom: 4px;
+    }
+    .bar { height: 9px; width: 100%; background: #ebeff4; border-radius: 999px; overflow: hidden; }
+    .bar > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+
+    /* Keys panel */
+    .keys-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+    .keys-grid label { font-size: 0.75rem; color: var(--muted); display: block; margin-bottom: 4px; }
+
+    /* Badges */
+    .badge {
+      display: inline-flex; align-items: center; gap: 5px;
+      border-radius: 999px; padding: 4px 10px; font-size: 0.78rem; font-weight: 700;
+    }
+    .badge.llm { background: var(--llm-bg); color: var(--llm-ink); }
+    .badge.heuristic { background: var(--heur-bg); color: var(--heur-ink); }
+
+    /* Stepper */
+    .stepper {
       display: flex;
-      justify-content: space-between;
-      font-size: 0.82rem;
-      color: var(--muted);
-      margin-bottom: 4px;
+      align-items: flex-start;
+      margin: 14px 0 6px;
+      overflow-x: auto;
     }
-    .bar {
-      height: 9px;
-      width: 100%;
-      background: #ebeff4;
-      border-radius: 999px;
-      overflow: hidden;
+    .step {
+      flex: 1;
+      min-width: 100px;
+      text-align: center;
+      position: relative;
+      padding-top: 20px;
     }
-    .bar > span {
-      display: block;
-      height: 100%;
-      background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    .step .dot {
+      width: 16px; height: 16px; border-radius: 50%;
+      background: #e2e8f0; border: 2px solid #cbd5e1;
+      margin: 0 auto 6px;
     }
+    .step .line {
+      position: absolute; top: 7px; left: -50%; width: 100%; height: 2px;
+      background: #e2e8f0; z-index: -1;
+    }
+    .step:first-child .line { display: none; }
+    .step .lbl { font-size: 0.72rem; color: var(--muted); line-height: 1.2; }
+    .step.done .dot { background: var(--accent); border-color: var(--accent); }
+    .step.done .line { background: var(--accent); }
+    .step.active .dot { background: var(--accent-2); border-color: var(--accent-2); box-shadow: 0 0 0 4px #dbeafe; }
+    .step.active .lbl { color: var(--ink); font-weight: 700; }
+    .step.blocked .dot { background: var(--warn); border-color: var(--warn); }
+    .step.rejected .dot, .step.failed .dot { background: var(--bad); border-color: var(--bad); }
+
+    /* Reasoning box */
+    .reasoning-box {
+      background: var(--llm-bg);
+      border: 1px solid #c7d2fe;
+      border-radius: 12px;
+      padding: 12px 14px;
+      margin-top: 10px;
+    }
+    .reasoning-box.heuristic { background: var(--heur-bg); border-color: var(--line); }
+    .reasoning-box h4 { margin: 0 0 6px; font-size: 0.85rem; }
+    .reasoning-box p { margin: 4px 0; font-size: 0.85rem; }
+    .reasoning-box ul { margin: 4px 0 0; padding-left: 18px; font-size: 0.83rem; }
+    .compare-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+    @media (max-width: 720px) { .compare-grid { grid-template-columns: 1fr; } }
+
+    /* Changes table */
+    table.changes { width: 100%; border-collapse: collapse; font-size: 0.83rem; margin-top: 8px; }
+    table.changes th, table.changes td {
+      text-align: left; padding: 8px 8px; border-bottom: 1px solid var(--line);
+    }
+    table.changes tbody tr { cursor: pointer; }
+    table.changes tbody tr:hover { background: #f8fafc; }
+    table.changes tbody tr.selected { background: var(--ok-bg); }
+    .pill {
+      display: inline-block; padding: 2px 8px; border-radius: 999px;
+      font-size: 0.72rem; font-weight: 700; background: #e2e8f0; color: var(--muted);
+    }
+    .pill.ok { background: #dcfce7; color: #166534; }
+    .pill.warn { background: #fef3c7; color: #92400e; }
+    .pill.bad { background: #fee2e2; color: #991b1b; }
+
+    .detail-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px;
+      font-size: 0.85rem; margin-top: 10px;
+    }
+    .detail-grid .k { color: var(--muted); }
+    pre.patch {
+      background: #0f172a; color: #e2e8f0; border-radius: 10px;
+      padding: 12px; font-size: 0.76rem; overflow-x: auto; margin-top: 8px;
+      max-height: 260px;
+    }
+    .policy-list { margin: 6px 0 0; padding-left: 18px; font-size: 0.83rem; color: var(--bad); }
+    .policy-ok { color: #166534; font-size: 0.83rem; margin-top: 6px; }
+
     @media (max-width: 860px) {
       .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .bars { grid-template-columns: 1fr; }
-      .controls { grid-template-columns: 1fr; }
+      .controls, .controls.three { grid-template-columns: 1fr; }
+      .keys-grid { grid-template-columns: 1fr; }
+      .detail-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
   <div class="wrap">
     <div class="header">
-      <h1>Agentic Production Support Dashboard</h1>
+      <div>
+        <h1>Agentic Production Support Dashboard</h1>
+        <p class="tagline">AI proposes the diagnosis and fix. Humans control every risky decision.</p>
+      </div>
     </div>
 
     <div class="panel">
-      <div class="controls">
-        <input id="apiKey" type="password" placeholder="X-API-Key (viewer/approver/release key)">
-        <button id="refreshBtn">Refresh Metrics</button>
-        <button id="mockBtn" class="secondary">Create Mock Incident</button>
+      <p class="tagline" style="margin:0 0 10px;">
+        Three roles gate who can do what: <strong>Viewer</strong> can only look,
+        <strong>Approver</strong> can triage/prepare/decide, <strong>Release</strong> can promote to prod.
+        Pre-filled with local demo keys below &mdash; only change these if you're pointing at a different environment.
+      </p>
+      <div class="keys-grid">
+        <div>
+          <label>Viewer key (read-only)</label>
+          <input id="viewerKey" type="password" value="viewer-local-key">
+        </div>
+        <div>
+          <label>Approver key (triage / PR / dev / decide)</label>
+          <input id="approverKey" type="password" value="approver-local-key">
+        </div>
+        <div>
+          <label>Release key (promote to prod)</label>
+          <input id="releaseKey" type="password" value="release-local-key">
+        </div>
       </div>
-      <div class="controls" style="margin-top:8px;">
-        <input id="changeId" type="text" placeholder="Change ID for PR prep (e.g., CHG-AB12CD34)">
-        <button id="preparePrBtn">Prepare Draft PR</button>
-        <button id="copyLastBtn" class="secondary">Use Last Change</button>
-      </div>
-      <div id="status" class="status">Enter API key and click Refresh Metrics.</div>
+      <div id="status" class="status">Ready. Click "Create Mock Incident" below to begin.</div>
     </div>
 
+    <!-- ================= AUTOMATED: incident intake + AI triage ================= -->
     <div class="panel">
-      <div class="controls">
+      <div class="section-label">
+        <span class="tag">🤖 Automated by the agent</span>
+        <span class="desc">Classifies the incident, opens a ticket, and queues dev validation — no human involved yet.</span>
+      </div>
+      <div class="btn-row">
+        <button id="mockBtn">Create Mock Incident</button>
+        <button id="compareBtn" class="ghost">Compare Triage Modes (Heuristic vs AI)</button>
+      </div>
+
+      <div id="latestReasoning"></div>
+      <div id="compareGrid"></div>
+
+      <div class="section-divider">
+        <div class="section-label">
+          <span class="tag" style="font-size:0.9rem;">Scheduler / APM polling</span>
+          <span class="desc">Simulates a real APM alert pipeline instead of a manual click.</span>
+        </div>
+      </div>
+      <div class="controls" style="margin-top:6px;">
         <input id="schedulerAlertId" type="text" placeholder="Optional scheduler alert ID (e.g., apm-1001)">
-        <button id="queueAlertBtn">Queue Scheduler Alert</button>
-        <button id="runSchedulerBtn" class="secondary">Run Scheduler Once</button>
-      </div>
-      <div class="controls" style="margin-top:8px;">
-        <input id="schedulerStatusMode" type="text" placeholder="Scheduler mode/status appears below" disabled>
-        <button id="refreshSchedulerBtn">Refresh Scheduler Status</button>
+        <button id="queueAlertBtn" class="secondary">Queue Scheduler Alert</button>
         <button id="seedSafeAlertBtn" class="secondary">Seed Safe Alert</button>
+      </div>
+      <div class="btn-row">
+        <button id="runSchedulerBtn" class="secondary">Run Scheduler Once</button>
+        <button id="refreshSchedulerBtn" class="ghost">Refresh Scheduler Status</button>
       </div>
       <div id="schedulerStatusText" class="status">Scheduler status not loaded yet.</div>
     </div>
 
+    <!-- ================= HUMAN: review + release ================= -->
     <div class="panel">
+      <div class="section-label">
+        <span class="tag">👤 Human controlled</span>
+        <span class="desc">Everything below requires an approver or release operator. The agent cannot promote to production on its own.</span>
+      </div>
+
+      <table class="changes">
+        <thead>
+          <tr><th>Change</th><th>Service</th><th>Issue</th><th>Mode</th><th>Conf.</th><th>Status</th><th>Stage</th></tr>
+        </thead>
+        <tbody id="changesBody"><tr><td colspan="7">No changes loaded yet.</td></tr></tbody>
+      </table>
+      <div class="btn-row">
+        <button id="refreshChangesBtn" class="ghost">Refresh Changes</button>
+      </div>
+
+      <div id="selectedInfo" class="status" style="margin-top:14px;">Select a change above to review and act on it.</div>
+      <div id="stepper"></div>
+      <div id="changeDetail"></div>
+
+      <div class="controls" style="margin-top:12px;">
+        <textarea id="actionComment" placeholder="Optional comment used for prepare-pr / decision / promote"></textarea>
+      </div>
+      <div class="btn-row">
+        <button id="preparePrBtn" class="secondary">Prepare Draft PR</button>
+        <button id="executeDevBtn" class="secondary">Execute Dev Validation</button>
+        <button id="refreshBuildBtn" class="secondary">Refresh Build Status</button>
+        <button id="approveBtn">Approve</button>
+        <button id="rejectBtn" class="bad-btn">Reject</button>
+        <button id="promoteBtn" class="warn-btn">Promote to Production</button>
+      </div>
+
+      <pre id="patchPreview" class="patch" style="display:none;"></pre>
+    </div>
+
+    <!-- ================= OUTCOMES ================= -->
+    <div class="panel">
+      <div class="section-label">
+        <span class="tag">📊 Outcomes</span>
+        <span class="desc">Aggregate metrics across every change the agent has processed.</span>
+      </div>
+      <div class="btn-row" style="margin-bottom:10px;">
+        <button id="refreshBtn" class="ghost">Refresh Metrics</button>
+      </div>
       <div class="grid">
         <div class="kpi"><div class="label">Total Changes</div><div id="k-total" class="value">0</div></div>
         <div class="kpi"><div class="label">Avg Confidence</div><div id="k-conf" class="value">0.00</div></div>
@@ -212,48 +388,66 @@
   </div>
 
   <script>
+    const STAGES = ["Incident Ingested", "AI Triage", "Ticket + Dev Job", "PR Drafted", "Dev Validation", "Human Approval", "Production"];
+
     const statusEl = document.getElementById("status");
-    const apiKeyEl = document.getElementById("apiKey");
-    const refreshBtn = document.getElementById("refreshBtn");
-    const mockBtn = document.getElementById("mockBtn");
-    const preparePrBtn = document.getElementById("preparePrBtn");
-    const copyLastBtn = document.getElementById("copyLastBtn");
-    const changeIdEl = document.getElementById("changeId");
-    const schedulerAlertIdEl = document.getElementById("schedulerAlertId");
-    const schedulerStatusModeEl = document.getElementById("schedulerStatusMode");
-    const schedulerStatusTextEl = document.getElementById("schedulerStatusText");
-    const queueAlertBtn = document.getElementById("queueAlertBtn");
-    const runSchedulerBtn = document.getElementById("runSchedulerBtn");
-    const refreshSchedulerBtn = document.getElementById("refreshSchedulerBtn");
-    const seedSafeAlertBtn = document.getElementById("seedSafeAlertBtn");
-    let lastChangeId = "";
+    const selectedInfoEl = document.getElementById("selectedInfo");
+    let selectedChangeId = "";
+    let lastCompareBase = null;
 
-    function setStatus(text) {
-      statusEl.textContent = text;
+    function el(id) { return document.getElementById(id); }
+    function setStatus(text) { statusEl.textContent = text; }
+
+    function loadKeys() {
+      // Fall back to the pre-filled local demo keys already in the HTML, not blank,
+      // so a first-ever visit still works with zero setup.
+      el("viewerKey").value = localStorage.getItem("ifa_viewer_key") || el("viewerKey").value;
+      el("approverKey").value = localStorage.getItem("ifa_approver_key") || el("approverKey").value;
+      el("releaseKey").value = localStorage.getItem("ifa_release_key") || el("releaseKey").value;
+    }
+    function persistKeys() {
+      localStorage.setItem("ifa_viewer_key", el("viewerKey").value.trim());
+      localStorage.setItem("ifa_approver_key", el("approverKey").value.trim());
+      localStorage.setItem("ifa_release_key", el("releaseKey").value.trim());
+    }
+    ["viewerKey", "approverKey", "releaseKey"].forEach((id) => {
+      el(id).addEventListener("change", persistKeys);
+    });
+
+    function keyFor(role) {
+      if (role === "approver") return el("approverKey").value.trim();
+      if (role === "release") return el("releaseKey").value.trim();
+      return el("viewerKey").value.trim();
     }
 
-    function asPct(v) {
-      return `${(Number(v || 0) * 100).toFixed(1)}%`;
+    async function api(path, { method = "GET", role = "viewer", body = null } = {}) {
+      const headers = { "Content-Type": "application/json" };
+      const key = keyFor(role);
+      if (key) headers["X-API-Key"] = key;
+      const res = await fetch(path, {
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const text = await res.text();
+      let parsed;
+      try { parsed = text ? JSON.parse(text) : {}; } catch { parsed = { raw: text }; }
+      if (!res.ok) {
+        const detail = parsed && parsed.detail ? parsed.detail : text;
+        throw new Error(`${res.status} ${detail}`);
+      }
+      return parsed;
     }
 
-    function asSec(v) {
-      return `${Math.round(Number(v || 0))}s`;
-    }
-
-    function setKpi(id, value) {
-      const el = document.getElementById(id);
-      if (el) el.textContent = value;
-    }
+    function asPct(v) { return `${(Number(v || 0) * 100).toFixed(1)}%`; }
+    function asSec(v) { return `${Math.round(Number(v || 0))}s`; }
+    function setKpi(id, value) { const e = el(id); if (e) e.textContent = value; }
 
     function renderBars(containerId, data, total) {
-      const root = document.getElementById(containerId);
+      const root = el(containerId);
       root.innerHTML = "";
       const entries = Object.entries(data || {});
-      if (!entries.length) {
-        root.textContent = "No data";
-        return;
-      }
-
+      if (!entries.length) { root.textContent = "No data"; return; }
       for (const [label, count] of entries.sort((a, b) => b[1] - a[1])) {
         const pct = total > 0 ? (count / total) * 100 : 0;
         const row = document.createElement("div");
@@ -266,25 +460,9 @@
       }
     }
 
-    function headers() {
-      const key = apiKeyEl.value.trim();
-      if (!key) return {"Content-Type": "application/json"};
-      return {"Content-Type": "application/json", "X-API-Key": key};
-    }
-
     async function loadMetrics() {
-      refreshBtn.disabled = true;
-      setStatus("Loading metrics...");
       try {
-        const res = await fetch("/v1/metrics/summary", {
-          method: "GET",
-          headers: headers(),
-        });
-        if (!res.ok) {
-          const t = await res.text();
-          throw new Error(`metrics request failed: ${res.status} ${t}`);
-        }
-        const m = await res.json();
+        const m = await api("/v1/metrics/summary", { role: "viewer" });
         setKpi("k-total", String(m.total_changes ?? 0));
         setKpi("k-conf", Number(m.avg_confidence ?? 0).toFixed(2));
         setKpi("k-block", asPct(m.policy_block_rate));
@@ -293,193 +471,360 @@
         setKpi("k-prod", asPct(m.promotion_success_rate));
         setKpi("k-tdev", asSec(m.avg_time_to_dev_seconds));
         setKpi("k-tprod", asSec(m.avg_time_to_prod_seconds));
-
         const total = Number(m.total_changes || 0);
         renderBars("issueBars", m.issue_type_counts, total);
         renderBars("stateBars", m.deployment_state_counts, total);
         renderBars("statusBars", m.status_counts, total);
         renderBars("triageBars", m.triage_mode_counts, total);
-        setStatus(`Metrics refreshed at ${new Date().toLocaleTimeString()}.`);
       } catch (err) {
-        setStatus(String(err));
-      } finally {
-        refreshBtn.disabled = false;
+        setStatus(`Metrics error: ${err.message}`);
       }
+    }
+
+    function modeBadge(mode) {
+      if (mode === "llm") return `<span class="badge llm">🤖 LLM (Gemini)</span>`;
+      return `<span class="badge heuristic">⚙️ Heuristic</span>`;
+    }
+
+    function reasoningBox(mode, confidence, probableCause, steps) {
+      const cls = mode === "llm" ? "" : "heuristic";
+      const stepsHtml = (steps || []).map((s) => `<li>${escapeHtml(s)}</li>`).join("");
+      return `
+        <div class="reasoning-box ${cls}">
+          <h4>${modeBadge(mode)} &nbsp; confidence ${Number(confidence || 0).toFixed(2)}</h4>
+          <p><strong>Probable cause:</strong> ${escapeHtml(probableCause || "n/a")}</p>
+          <ul>${stepsHtml}</ul>
+        </div>
+      `;
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      }[c]));
     }
 
     async function createMockIncident() {
-      mockBtn.disabled = true;
-      setStatus("Creating mock incident...");
+      el("mockBtn").disabled = true;
+      setStatus("Creating mock incident and running AI triage...");
       try {
-        const res = await fetch("/v1/incidents/mock", {
-          method: "POST",
-          headers: headers(),
-        });
-        if (!res.ok) {
-          const t = await res.text();
-          throw new Error(`mock incident failed: ${res.status} ${t}`);
-        }
-        const body = await res.json();
-        const changeId = body?.metadata?.change_id || "n/a";
-        lastChangeId = changeId;
-        setStatus(`Mock incident created. change_id=${changeId}`);
+        const body = await api("/v1/incidents/mock", { method: "POST", role: "viewer" });
+        const changeId = body?.metadata?.change_id || "";
+        const mode = body?.metadata?.triage_mode || "heuristic";
+        const steps = body?.metadata?.triage_hypothesis_steps || [];
+        el("latestReasoning").innerHTML = `<h4 style="margin:14px 0 4px;font-size:0.85rem;">Latest triage result</h4>` +
+          reasoningBox(mode, body.confidence, body.probable_cause, steps);
+        setStatus(`Mock incident created. change_id=${changeId} (issue_type=${body.issue_type}, is_recurring=${body.is_recurring})`);
+        await refreshChangesList();
+        if (changeId) await selectChange(changeId);
         await loadMetrics();
       } catch (err) {
-        setStatus(String(err));
+        setStatus(`Create incident failed: ${err.message}`);
       } finally {
-        mockBtn.disabled = false;
+        el("mockBtn").disabled = false;
       }
     }
 
-    async function prepareDraftPr() {
-      const changeId = changeIdEl.value.trim();
-      if (!changeId) {
-        setStatus("Enter a change ID first.");
-        return;
-      }
-      preparePrBtn.disabled = true;
-      setStatus(`Preparing draft PR for ${changeId}...`);
+    async function compareTriageModes() {
+      el("compareBtn").disabled = true;
+      setStatus("Running the same incident through heuristic and LLM triage...");
+      el("compareGrid").innerHTML = "";
       try {
-        const res = await fetch(`/v1/changes/${encodeURIComponent(changeId)}/prepare-pr`, {
-          method: "POST",
-          headers: headers(),
-          body: JSON.stringify({comment: "Prepared from dashboard demo"}),
-        });
-        if (!res.ok) {
-          const t = await res.text();
-          throw new Error(`prepare-pr failed: ${res.status} ${t}`);
+        const [heur, llm] = await Promise.all([
+          api("/v1/incidents/mock?triage_mode=heuristic", { method: "POST", role: "viewer" }),
+          api("/v1/incidents/mock?triage_mode=llm", { method: "POST", role: "viewer" }),
+        ]);
+        const grid = document.createElement("div");
+        grid.className = "compare-grid";
+        grid.innerHTML = `
+          <div>
+            <h4 style="font-size:0.85rem;margin:0 0 4px;">Forced: Heuristic</h4>
+            ${reasoningBox(heur?.metadata?.triage_mode || "heuristic", heur.confidence, heur.probable_cause, heur?.metadata?.triage_hypothesis_steps)}
+          </div>
+          <div>
+            <h4 style="font-size:0.85rem;margin:0 0 4px;">Requested: LLM</h4>
+            ${reasoningBox(llm?.metadata?.triage_mode || "heuristic", llm.confidence, llm.probable_cause, llm?.metadata?.triage_hypothesis_steps)}
+            ${llm?.metadata?.warnings?.length ? `<p class="status">Note: ${escapeHtml(llm.metadata.warnings.join(" | "))}</p>` : ""}
+          </div>
+        `;
+        el("compareGrid").appendChild(grid);
+        setStatus("Comparison complete. If the LLM side still shows Heuristic, add LLM_API_KEY in .env and restart the API.");
+        await refreshChangesList();
+        await loadMetrics();
+      } catch (err) {
+        setStatus(`Compare failed: ${err.message}`);
+      } finally {
+        el("compareBtn").disabled = false;
+      }
+    }
+
+    function stageFor(c) {
+      // index = the next actionable stage (or terminal state); everything before it is "done".
+      if (c.deployment_state === "promoted_to_prod") return { index: 7, state: "done" };
+      if (c.deployment_state === "prod_promotion_failed") return { index: 7, state: "failed" };
+      if (c.deployment_state === "promoting") return { index: 6, state: "active" };
+      if (c.deployment_state === "dev_fix_in_progress") return { index: 4, state: "active" };
+      if (c.status === "approved" && c.deployment_state === "ready_for_prod") return { index: 7, state: "active" };
+      if (c.deployment_state === "closed_rejected") return { index: 6, state: "rejected" };
+      if (c.deployment_state === "blocked_by_policy") return { index: 6, state: "blocked" };
+      if (c.deployment_state === "ready_for_prod") return { index: 6, state: "active" };
+      if (c.dev_execution_status === "failed") return { index: 5, state: "failed" };
+      if (c.pr_status === "draft_created") return { index: 5, state: "active" };
+      return { index: 4, state: "active" };
+    }
+
+    function renderStepper(c) {
+      const { index, state } = stageFor(c);
+      const html = STAGES.map((label, i) => {
+        const stepNum = i + 1;
+        let cls = "";
+        if (stepNum < index) cls = "done";
+        else if (stepNum === index) cls = state === "active" ? "active" : state;
+        return `<div class="step ${cls}"><div class="line"></div><div class="dot"></div><div class="lbl">${label}</div></div>`;
+      }).join("");
+      el("stepper").innerHTML = `<div class="stepper">${html}</div>`;
+    }
+
+    function pillFor(text, kind) {
+      return `<span class="pill ${kind}">${escapeHtml(text)}</span>`;
+    }
+
+    function statusKind(c) {
+      if (c.status === "rejected" || c.deployment_state === "blocked_by_policy" || c.deployment_state === "prod_promotion_failed" || c.deployment_state === "dev_fix_failed") return "bad";
+      if (c.deployment_state === "promoted_to_prod") return "ok";
+      return "warn";
+    }
+
+    async function refreshChangesList() {
+      try {
+        const changes = await api("/v1/changes", { role: "viewer" });
+        const rows = [...changes].reverse().slice(0, 25);
+        const body = el("changesBody");
+        if (!rows.length) {
+          body.innerHTML = `<tr><td colspan="7">No changes yet — create a mock incident above.</td></tr>`;
+          return;
         }
-        const body = await res.json();
+        body.innerHTML = rows.map((c) => {
+          const stg = stageFor(c);
+          const sel = c.change_id === selectedChangeId ? "selected" : "";
+          return `
+            <tr class="${sel}" data-id="${c.change_id}">
+              <td>${c.change_id}</td>
+              <td>${escapeHtml(c.service)}</td>
+              <td>${escapeHtml(c.issue_type)}</td>
+              <td>${modeBadge(c.triage_mode_used)}</td>
+              <td>${Number(c.confidence || 0).toFixed(2)}</td>
+              <td>${pillFor(c.status, statusKind(c))}</td>
+              <td>${STAGES[stg.index - 1]}</td>
+            </tr>
+          `;
+        }).join("");
+        body.querySelectorAll("tr[data-id]").forEach((tr) => {
+          tr.addEventListener("click", () => selectChange(tr.getAttribute("data-id")));
+        });
+      } catch (err) {
+        setStatus(`Failed to load changes: ${err.message}`);
+      }
+    }
+
+    async function selectChange(changeId) {
+      selectedChangeId = changeId;
+      selectedInfoEl.textContent = `Selected change: ${changeId}`;
+      await refreshChangesList();
+      await loadChangeDetail(changeId);
+    }
+
+    function codeFixHtml(c) {
+      if (!c.code_change_status || c.code_change_status === "not_started") return "";
+      const kind = c.code_change_status === "applied" ? "ok" : "bad";
+      const label = c.code_change_status === "applied" ? "🔧 AI code fix applied" : "🔧 AI code fix failed";
+      return `
+        <div style="margin-top:10px;">
+          <span class="k" style="font-size:0.85rem;">Self-fixing code agent:</span>
+          ${pillFor(label, kind)}
+          <p class="status" style="margin-top:6px;">${escapeHtml(c.code_change_message || "")}</p>
+          ${c.test_output ? `<pre class="patch" style="max-height:140px;">${escapeHtml(c.test_output)}</pre>` : ""}
+        </div>
+      `;
+    }
+
+    async function loadChangeDetail(changeId) {
+      try {
+        const c = await api(`/v1/changes/${encodeURIComponent(changeId)}`, { role: "viewer" });
+        renderStepper(c);
+
+        const policyHtml = (c.policy_reasons && c.policy_reasons.length)
+          ? `<ul class="policy-list">${c.policy_reasons.map((r) => `<li>${escapeHtml(r)}</li>`).join("")}</ul>`
+          : `<div class="policy-ok">No policy blockers.</div>`;
+
+        el("changeDetail").innerHTML = `
+          ${reasoningBox(c.triage_mode_used, c.confidence, "", c.triage_hypothesis_steps)}
+          <div class="detail-grid">
+            <div><span class="k">Service:</span> ${escapeHtml(c.service)} (${escapeHtml(c.environment)})</div>
+            <div><span class="k">Jira:</span> ${escapeHtml(c.jira_key || "pending (ticket not created)")}</div>
+            <div><span class="k">Jenkins status:</span> ${escapeHtml(c.jenkins_status)}</div>
+            <div><span class="k">PR status:</span> ${escapeHtml(c.pr_status)} ${c.pr_url ? `(<a href="${c.pr_url}" target="_blank" rel="noopener">link</a>)` : ""}</div>
+            <div><span class="k">Test evidence:</span> ${escapeHtml(c.test_evidence_status)} ${c.test_pass_rate != null ? `(${(c.test_pass_rate*100).toFixed(0)}%)` : ""}</div>
+            <div><span class="k">Dev execution:</span> ${escapeHtml(c.dev_execution_status)} ${c.dev_apm_improvement_pct != null ? `(APM +${c.dev_apm_improvement_pct}%)` : ""}</div>
+            <div><span class="k">Decision:</span> ${escapeHtml(c.status)} ${c.decided_by ? `by ${escapeHtml(c.decided_by)}` : ""}</div>
+            <div><span class="k">Deployment state:</span> ${escapeHtml(c.deployment_state)}</div>
+          </div>
+          <div style="margin-top:8px;"><span class="k" style="font-size:0.85rem;">Policy check:</span> ${policyHtml}</div>
+          ${codeFixHtml(c)}
+        `;
+
+        const patchEl = el("patchPreview");
+        if (c.patch_preview) {
+          patchEl.style.display = "block";
+          patchEl.textContent = c.patch_preview;
+        } else {
+          patchEl.style.display = "none";
+        }
+      } catch (err) {
+        setStatus(`Failed to load change detail: ${err.message}`);
+      }
+    }
+
+    async function runChangeAction(fn) {
+      if (!selectedChangeId) { setStatus("Select a change first."); return; }
+      try {
+        await fn();
+        await refreshChangesList();
+        await loadChangeDetail(selectedChangeId);
+        await loadMetrics();
+      } catch (err) {
+        setStatus(`Action failed: ${err.message}`);
+      }
+    }
+
+    async function preparePr() {
+      await runChangeAction(async () => {
+        setStatus("Preparing draft PR + patch artifact...");
+        const comment = el("actionComment").value.trim();
+        const body = await api(`/v1/changes/${encodeURIComponent(selectedChangeId)}/prepare-pr`, {
+          method: "POST", role: "approver", body: { comment },
+        });
         setStatus(`Draft PR ready: ${body.pr_url} | tests=${body.test_evidence_status}`);
-      } catch (err) {
-        setStatus(String(err));
-      } finally {
-        preparePrBtn.disabled = false;
-      }
+      });
     }
 
-    function useLastChangeId() {
-      if (!lastChangeId) {
-        setStatus("No mock incident created yet.");
-        return;
-      }
-      changeIdEl.value = lastChangeId;
-      setStatus(`Using last change ID: ${lastChangeId}`);
-    }
-
-    function schedulerSummaryText(body) {
-      const stats = body?.stats || {};
-      const processed = Number(stats.alerts_processed || 0);
-      const skipped = Number(stats.alerts_skipped_dedup || 0);
-      const failed = Number(stats.alerts_failed || 0);
-      const runs = Number(stats.runs || 0);
-      return `runs=${runs}, processed=${processed}, dedup_skipped=${skipped}, failed=${failed}`;
-    }
-
-    async function refreshSchedulerStatus() {
-      refreshSchedulerBtn.disabled = true;
-      try {
-        const res = await fetch("/v1/scheduler/status", {
-          method: "GET",
-          headers: headers(),
+    async function executeDev() {
+      await runChangeAction(async () => {
+        setStatus("Running dev validation (Jenkins + APM evidence)...");
+        const comment = el("actionComment").value.trim();
+        const body = await api(`/v1/changes/${encodeURIComponent(selectedChangeId)}/execute-dev`, {
+          method: "POST", role: "approver", body: { comment },
         });
-        if (!res.ok) {
-          const t = await res.text();
-          throw new Error(`scheduler status failed: ${res.status} ${t}`);
-        }
-        const body = await res.json();
-        const mode = body?.auto_remediation_mode || "unknown";
-        const running = body?.running ? "running" : "stopped";
-        schedulerStatusModeEl.value = `${running} | auto_remediation=${mode}`;
-        schedulerStatusTextEl.textContent = schedulerSummaryText(body);
-      } catch (err) {
-        schedulerStatusTextEl.textContent = String(err);
-      } finally {
-        refreshSchedulerBtn.disabled = false;
-      }
+        setStatus(`Dev execution ${body.dev_execution_status}. deployment_state=${body.deployment_state}`);
+      });
+    }
+
+    async function refreshBuildStatus() {
+      await runChangeAction(async () => {
+        setStatus("Checking Jenkins build status...");
+        const body = await api(`/v1/changes/${encodeURIComponent(selectedChangeId)}/refresh-status`, {
+          method: "POST", role: "approver",
+        });
+        setStatus(`Build status refreshed. deployment_state=${body.deployment_state}, jenkins_status=${body.jenkins_status}`);
+      });
+    }
+
+    async function decide(decision) {
+      await runChangeAction(async () => {
+        setStatus(`Recording ${decision} decision...`);
+        const comment = el("actionComment").value.trim();
+        const body = await api(`/v1/changes/${encodeURIComponent(selectedChangeId)}/decision`, {
+          method: "POST", role: "approver", body: { decision, comment },
+        });
+        setStatus(`Decision recorded: ${body.status}. deployment_state=${body.deployment_state}${body.policy_reasons?.length ? " | blocked: " + body.policy_reasons.join("; ") : ""}`);
+      });
+    }
+
+    async function promote() {
+      await runChangeAction(async () => {
+        setStatus("Triggering production promotion...");
+        const comment = el("actionComment").value.trim();
+        const body = await api(`/v1/changes/${encodeURIComponent(selectedChangeId)}/promote`, {
+          method: "POST", role: "release", body: { comment },
+        });
+        const pending = body.deployment_state === "promoting" ? " (deploy still running - use Refresh Build Status)" : "";
+        setStatus(`Promotion result: ${body.promotion_result}. deployment_state=${body.deployment_state}${pending}`);
+      });
     }
 
     function buildAlertPayload(isSafeTemplate) {
       if (isSafeTemplate) {
         return {
-          service: "payments-service",
-          metric: "latency_p99_ms",
-          value: 1300,
-          threshold: 800,
-          environment: "prod",
-          timestamp: new Date().toISOString(),
-          message: "Scheduler seeded safe alert: checkout latency increased"
+          service: "payments-service", metric: "latency_p99_ms", value: 1300, threshold: 800,
+          environment: "prod", timestamp: new Date().toISOString(),
+          message: "Scheduler seeded safe alert: checkout latency increased",
         };
       }
       return {
-        service: "orders-service",
-        metric: "error_rate_pct",
-        value: 7.5,
-        threshold: 2.0,
-        environment: "prod",
-        timestamp: new Date().toISOString(),
-        message: "Scheduler alert: elevated 5xx rate in orders API"
+        service: "orders-service", metric: "error_rate_pct", value: 7.5, threshold: 2.0,
+        environment: "prod", timestamp: new Date().toISOString(),
+        message: "Scheduler alert: elevated 5xx rate in orders API",
       };
     }
 
     async function queueSchedulerAlert(isSafeTemplate = false) {
-      queueAlertBtn.disabled = true;
-      seedSafeAlertBtn.disabled = true;
       setStatus("Queueing scheduler alert...");
       try {
         const payload = buildAlertPayload(isSafeTemplate);
-        const sourceId = schedulerAlertIdEl.value.trim();
+        const sourceId = el("schedulerAlertId").value.trim();
         const qs = sourceId ? `?source_alert_id=${encodeURIComponent(sourceId)}` : "";
-        const res = await fetch(`/v1/apm/mock-alerts${qs}`, {
-          method: "POST",
-          headers: headers(),
-          body: JSON.stringify(payload),
-        });
-        if (!res.ok) {
-          const t = await res.text();
-          throw new Error(`queue alert failed: ${res.status} ${t}`);
-        }
-        const body = await res.json();
+        const body = await api(`/v1/apm/mock-alerts${qs}`, { method: "POST", role: "approver", body: payload });
         setStatus(`Queued scheduler alert: ${body.source_alert_id}`);
         await refreshSchedulerStatus();
       } catch (err) {
-        setStatus(String(err));
-      } finally {
-        queueAlertBtn.disabled = false;
-        seedSafeAlertBtn.disabled = false;
+        setStatus(`Queue alert failed: ${err.message}`);
       }
     }
 
     async function runSchedulerOnce() {
-      runSchedulerBtn.disabled = true;
       setStatus("Running scheduler cycle...");
       try {
-        const res = await fetch("/v1/scheduler/run-once", {
-          method: "POST",
-          headers: headers(),
-        });
-        if (!res.ok) {
-          const t = await res.text();
-          throw new Error(`scheduler run failed: ${res.status} ${t}`);
-        }
+        await api("/v1/scheduler/run-once", { method: "POST", role: "approver" });
         setStatus("Scheduler cycle completed.");
         await refreshSchedulerStatus();
+        await refreshChangesList();
         await loadMetrics();
       } catch (err) {
-        setStatus(String(err));
-      } finally {
-        runSchedulerBtn.disabled = false;
+        setStatus(`Scheduler run failed: ${err.message}`);
       }
     }
 
-    refreshBtn.addEventListener("click", loadMetrics);
-    mockBtn.addEventListener("click", createMockIncident);
-    preparePrBtn.addEventListener("click", prepareDraftPr);
-    copyLastBtn.addEventListener("click", useLastChangeId);
-    queueAlertBtn.addEventListener("click", () => queueSchedulerAlert(false));
-    seedSafeAlertBtn.addEventListener("click", () => queueSchedulerAlert(true));
-    runSchedulerBtn.addEventListener("click", runSchedulerOnce);
-    refreshSchedulerBtn.addEventListener("click", refreshSchedulerStatus);
+    async function refreshSchedulerStatus() {
+      try {
+        const body = await api("/v1/scheduler/status", { role: "approver" });
+        const stats = body?.stats || {};
+        const running = body?.running ? "running" : "stopped";
+        el("schedulerStatusText").textContent =
+          `${running} | intake only | runs=${stats.runs || 0}, processed=${stats.alerts_processed || 0}, dedup_skipped=${stats.alerts_skipped_dedup || 0}, failed=${stats.alerts_failed || 0}`;
+      } catch (err) {
+        el("schedulerStatusText").textContent = `Scheduler status error: ${err.message}`;
+      }
+    }
+
+    el("mockBtn").addEventListener("click", createMockIncident);
+    el("compareBtn").addEventListener("click", compareTriageModes);
+    el("refreshChangesBtn").addEventListener("click", refreshChangesList);
+    el("refreshBtn").addEventListener("click", loadMetrics);
+    el("preparePrBtn").addEventListener("click", preparePr);
+    el("executeDevBtn").addEventListener("click", executeDev);
+    el("refreshBuildBtn").addEventListener("click", refreshBuildStatus);
+    el("approveBtn").addEventListener("click", () => decide("approve"));
+    el("rejectBtn").addEventListener("click", () => decide("reject"));
+    el("promoteBtn").addEventListener("click", promote);
+    el("queueAlertBtn").addEventListener("click", () => queueSchedulerAlert(false));
+    el("seedSafeAlertBtn").addEventListener("click", () => queueSchedulerAlert(true));
+    el("runSchedulerBtn").addEventListener("click", runSchedulerOnce);
+    el("refreshSchedulerBtn").addEventListener("click", refreshSchedulerStatus);
+
+    loadKeys();
+    refreshChangesList();
+    loadMetrics();
+    refreshSchedulerStatus();
   </script>
 </body>
 </html>

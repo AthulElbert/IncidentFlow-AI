@@ -2,9 +2,9 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from app.adapters.jenkins_client import JenkinsClient, MockJenkinsClient
-from app.adapters.jira_client import JiraClient, MockJiraClient
-from app.models.schemas import APMEvent, IncidentRecord, IncidentResponse
+from app.adapters.jenkins_client import JenkinsClient
+from app.adapters.jira_client import JiraClient
+from app.models.schemas import APMEvent, IncidentRecord, IncidentResponse, JenkinsBuildResult, JiraTicket
 from app.services.change_control import ChangeControlStore
 from app.services.fix_planner import build_ticket_text, suggest_runbook_actions
 from app.services.knowledge_base import IncidentKnowledgeBase
@@ -39,20 +39,19 @@ class SupportAgentPipeline:
             storage_backend=storage_backend,
             database_url=database_url,
         )
-        self._jira_mock_fallback = MockJiraClient(project_key="SUP")
-        self._jenkins_mock_fallback = MockJenkinsClient()
 
-    def process_event(self, event: APMEvent) -> IncidentResponse:
+    def process_event(self, event: APMEvent, triage_mode_override: str | None = None) -> IncidentResponse:
         logger.info(
             "incident-received",
             extra={
                 "service": event.service,
                 "metric": event.metric,
                 "environment": event.environment,
+                "triage_mode_override": triage_mode_override,
             },
         )
 
-        triage = self.triage_agent.triage(event)
+        triage = self.triage_agent.triage(event, mode_override=triage_mode_override)
         issue_type = triage.issue_type
         confidence = triage.confidence
         probable_cause = triage.probable_cause
@@ -78,18 +77,19 @@ class SupportAgentPipeline:
         jira_mode_used = self.jira_mode
         jenkins_mode_used = self.jenkins_mode
 
+        # A failed integration is recorded as failed. It never turns into a simulated
+        # success: there is no fake ticket key or fake build, and the warning blocks
+        # the change from reaching production until a human has looked at it.
+        jira_ticket: JiraTicket | None
+        jira_sync_status = "synced"
         try:
             jira_ticket = self.jira.create_ticket(summary=summary, description=description, labels=labels)
         except Exception as exc:
-            warning = f"Jira integration failed; used mock fallback: {exc}"
-            warnings.append(warning)
-            logger.warning("jira-fallback", extra={"error": str(exc)})
-            jira_ticket = self._jira_mock_fallback.create_ticket(
-                summary=summary,
-                description=description,
-                labels=labels,
-            )
-            jira_mode_used = "mock-fallback"
+            warnings.append(f"Jira integration failed; ticket pending retry: {exc}")
+            logger.warning("jira-failed", extra={"error": str(exc)})
+            jira_ticket = None
+            jira_sync_status = "pending_retry"
+            jira_mode_used = "failed"
 
         try:
             jenkins_result = self.jenkins.trigger_dev_validation(
@@ -97,14 +97,10 @@ class SupportAgentPipeline:
                 issue_type=issue_type,
             )
         except Exception as exc:
-            warning = f"Jenkins integration failed; used mock fallback: {exc}"
-            warnings.append(warning)
-            logger.warning("jenkins-fallback", extra={"error": str(exc)})
-            jenkins_result = self._jenkins_mock_fallback.trigger_dev_validation(
-                service=event.service,
-                issue_type=issue_type,
-            )
-            jenkins_mode_used = "mock-fallback"
+            warnings.append(f"Jenkins integration failed; dev validation not started: {exc}")
+            logger.warning("jenkins-failed", extra={"error": str(exc)})
+            jenkins_result = JenkinsBuildResult(job_name="", build_number=0, status="UNKNOWN", url="")
+            jenkins_mode_used = "failed"
 
         incident = IncidentRecord(
             incident_id=f"INC-{str(uuid4()).split('-')[0].upper()}",
@@ -127,7 +123,8 @@ class SupportAgentPipeline:
             service=event.service,
             environment=event.environment,
             summary=summary,
-            jira_key=jira_ticket.key,
+            jira_key=jira_ticket.key if jira_ticket else None,
+            jira_sync_status=jira_sync_status,
             jenkins_job_url=jenkins_result.url,
             proposed_actions=suggestions,
             triage_mode_used=triage.mode_used,

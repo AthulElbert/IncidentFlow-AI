@@ -4,6 +4,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from app.models.schemas import UNSAFE_BUILD_STATES_FOR_PROD
 
 
 def _as_bool(value: str | None, default: bool = False) -> bool:
@@ -55,6 +56,10 @@ class Settings:
     code_change_max_lines: int
     code_change_auto_commit: bool
     code_change_auto_push: bool
+    code_fix_mode: str
+    code_fix_target_path: str
+    code_fix_max_latency_ms: float
+    code_fix_max_error_probability: float
     apm_poll_mode: str
     apm_poll_interval_seconds: int
     apm_alerts_mode: str
@@ -62,12 +67,7 @@ class Settings:
     apm_alerts_dynatrace_token: str
     apm_alerts_timeout_seconds: int
     apm_alert_queue_file: str
-    auto_remediation_mode: str
-    safe_auto_issue_types: list[str]
-    auto_promote_on_policy_pass: bool
     scheduler_actor: str
-    scheduler_approver_actor: str
-    scheduler_release_actor: str
     scheduler_dedup_file: str
     test_evidence_mode: str
     test_evidence_command: str
@@ -115,15 +115,57 @@ class Settings:
     jwt_role_claim: str
     jwt_actor_claim: str
     log_level: str
+    data_dir: str = "data"
+    allow_mock_fallback: bool = False
+    enforce_separation_of_duties: bool = True
+    jenkins_build_wait_seconds: float = 20.0
+    jenkins_poll_interval_seconds: float = 2.0
+    mock_jenkins_outcome: str = "success"
+    mock_jenkins_polls_until_done: int = 1
 
+
+class ConfigError(ValueError):
+    """Raised at startup when the configuration is unsafe or inconsistent."""
+
+
+def validate_settings(settings: "Settings") -> None:
+    errors: list[str] = []
+
+    unsafe_states = sorted(
+        {item.upper() for item in settings.allowed_jenkins_states_for_prod} & UNSAFE_BUILD_STATES_FOR_PROD
+    )
+    if unsafe_states:
+        errors.append(
+            f"ALLOWED_JENKINS_STATES_FOR_PROD must only contain terminal success states, got {unsafe_states}"
+        )
+
+    if settings.code_fix_mode == "llm":
+        if not settings.llm_api_key:
+            errors.append("CODE_FIX_MODE=llm requires LLM_API_KEY")
+        if settings.code_change_mode == "sandbox_git":
+            target = settings.code_fix_target_path.replace("\\", "/").lstrip("./")
+            allowed = [
+                part.strip().replace("\\", "/").rstrip("/")
+                for part in settings.code_change_allowed_paths.split(",")
+                if part.strip()
+            ]
+            if not any(target == prefix or target.startswith(prefix + "/") for prefix in allowed):
+                errors.append(
+                    f"CODE_FIX_TARGET_PATH '{target}' is not under CODE_CHANGE_ALLOWED_PATHS {allowed}"
+                )
+
+    if errors:
+        raise ConfigError("; ".join(errors))
 
 
 def load_settings(base_dir: str | None = None) -> Settings:
-    if base_dir:
-        env_path = Path(base_dir) / ".env"
-        load_dotenv(dotenv_path=env_path, override=False)
-    else:
-        load_dotenv(override=False)
+    # Tests set APP_SKIP_DOTENV so a developer's local .env cannot leak into them.
+    if not _as_bool(os.getenv("APP_SKIP_DOTENV")):
+        if base_dir:
+            env_path = Path(base_dir) / ".env"
+            load_dotenv(dotenv_path=env_path, override=False)
+        else:
+            load_dotenv(override=False)
 
     return Settings(
         storage_backend=os.getenv("STORAGE_BACKEND", "json").strip().lower(),
@@ -140,6 +182,10 @@ def load_settings(base_dir: str | None = None) -> Settings:
         code_change_max_lines=_as_int(os.getenv("CODE_CHANGE_MAX_LINES"), default=200),
         code_change_auto_commit=_as_bool(os.getenv("CODE_CHANGE_AUTO_COMMIT"), default=False),
         code_change_auto_push=_as_bool(os.getenv("CODE_CHANGE_AUTO_PUSH"), default=False),
+        code_fix_mode=os.getenv("CODE_FIX_MODE", "template").strip().lower(),
+        code_fix_target_path=os.getenv("CODE_FIX_TARGET_PATH", "faulty_project/app_config.json").strip(),
+        code_fix_max_latency_ms=_as_float(os.getenv("CODE_FIX_MAX_LATENCY_MS"), default=300.0),
+        code_fix_max_error_probability=_as_float(os.getenv("CODE_FIX_MAX_ERROR_PROBABILITY"), default=0.02),
         apm_poll_mode=os.getenv("APM_POLL_MODE", "off").strip().lower(),
         apm_poll_interval_seconds=_as_int(os.getenv("APM_POLL_INTERVAL_SECONDS"), default=30),
         apm_alerts_mode=os.getenv("APM_ALERTS_MODE", "mock").strip().lower(),
@@ -147,15 +193,7 @@ def load_settings(base_dir: str | None = None) -> Settings:
         apm_alerts_dynatrace_token=os.getenv("APM_ALERTS_DYNATRACE_TOKEN", "").strip(),
         apm_alerts_timeout_seconds=_as_int(os.getenv("APM_ALERTS_TIMEOUT_SECONDS"), default=10),
         apm_alert_queue_file=os.getenv("APM_ALERT_QUEUE_FILE", "data/apm_alert_queue.json").strip(),
-        auto_remediation_mode=os.getenv("AUTO_REMEDIATION_MODE", "assistive").strip().lower(),
-        safe_auto_issue_types=_as_list(
-            os.getenv("SAFE_AUTO_ISSUE_TYPES"),
-            default=["PERFORMANCE_DEGRADATION", "DEPENDENCY_FAILURE"],
-        ),
-        auto_promote_on_policy_pass=_as_bool(os.getenv("AUTO_PROMOTE_ON_POLICY_PASS"), default=False),
         scheduler_actor=os.getenv("SCHEDULER_ACTOR", "scheduler-agent").strip(),
-        scheduler_approver_actor=os.getenv("SCHEDULER_APPROVER_ACTOR", "scheduler-approver").strip(),
-        scheduler_release_actor=os.getenv("SCHEDULER_RELEASE_ACTOR", "scheduler-release").strip(),
         scheduler_dedup_file=os.getenv("SCHEDULER_DEDUP_FILE", "data/processed_alerts.json").strip(),
         test_evidence_mode=os.getenv("TEST_EVIDENCE_MODE", "mock").strip().lower(),
         test_evidence_command=os.getenv("TEST_EVIDENCE_COMMAND", "python -m pytest -q tests").strip(),
@@ -189,7 +227,7 @@ def load_settings(base_dir: str | None = None) -> Settings:
         require_zero_warnings_for_prod=_as_bool(os.getenv("REQUIRE_ZERO_WARNINGS_FOR_PROD"), default=True),
         allowed_jenkins_states_for_prod=_as_list(
             os.getenv("ALLOWED_JENKINS_STATES_FOR_PROD"),
-            default=["QUEUED", "SUCCESS"],
+            default=["SUCCESS"],
         ),
         auth_enabled=_as_bool(os.getenv("AUTH_ENABLED"), default=True),
         auth_mode=os.getenv("AUTH_MODE", "api_key").strip().lower(),
@@ -206,4 +244,11 @@ def load_settings(base_dir: str | None = None) -> Settings:
         jwt_role_claim=os.getenv("JWT_ROLE_CLAIM", "role").strip(),
         jwt_actor_claim=os.getenv("JWT_ACTOR_CLAIM", "sub").strip(),
         log_level=os.getenv("LOG_LEVEL", "INFO").strip().upper(),
+        data_dir=os.getenv("APP_DATA_DIR", "data").strip() or "data",
+        allow_mock_fallback=_as_bool(os.getenv("ALLOW_MOCK_FALLBACK"), default=False),
+        enforce_separation_of_duties=_as_bool(os.getenv("ENFORCE_SEPARATION_OF_DUTIES"), default=True),
+        jenkins_build_wait_seconds=_as_float(os.getenv("JENKINS_BUILD_WAIT_SECONDS"), default=20.0),
+        jenkins_poll_interval_seconds=_as_float(os.getenv("JENKINS_POLL_INTERVAL_SECONDS"), default=2.0),
+        mock_jenkins_outcome=os.getenv("MOCK_JENKINS_OUTCOME", "success").strip().lower(),
+        mock_jenkins_polls_until_done=_as_int(os.getenv("MOCK_JENKINS_POLLS"), default=1),
     )

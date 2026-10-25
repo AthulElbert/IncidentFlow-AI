@@ -1,170 +1,100 @@
 [
   {
-    "incident_id": "INC-0774F095",
-    "service": "faulty-project",
-    "metric": "latency_p95_seconds",
+    "incident_id": "INC-DEMO0001",
+    "service": "payments-service",
+    "metric": "latency_p99_ms",
     "issue_type": "performance_degradation",
-    "summary": "[New] faulty-project - performance_degradation in local",
-    "resolution": "No known resolution. Apply suggested runbook actions in dev and validate.",
+    "summary": "[Recurring] payments-service - performance_degradation in prod",
+    "resolution": "Increased connection pool size and enabled response caching; latency returned to baseline within 15 minutes.",
     "runbook_actions": [
       "Check p95/p99 latency breakdown by endpoint in APM.",
       "Scale service replicas by +1 in dev and verify latency trend.",
       "Temporarily increase upstream timeout by 10-15% in dev config."
     ],
-    "created_at": "2026-03-30T16:00:41.699743Z"
+    "created_at": "2026-07-10T09:12:00Z"
   },
   {
-    "incident_id": "INC-8B2AEB0D",
-    "service": "faulty-project",
-    "metric": "error_rate_per_sec",
+    "incident_id": "INC-DEMO0002",
+    "service": "orders-service",
+    "metric": "error_rate_pct",
     "issue_type": "application_error",
-    "summary": "[New] faulty-project - application_error in local",
-    "resolution": "No known resolution. Apply suggested runbook actions in dev and validate.",
+    "summary": "[New] orders-service - application_error in prod",
+    "resolution": "Rolled back the faulty deployment and enabled the safe-mode feature flag for the checkout module.",
     "runbook_actions": [
       "Inspect recent deployment diff and rollback candidate changes in dev.",
       "Enable safe-mode feature flags for failing module.",
       "Validate error-rate drop after config toggle in dev."
     ],
-    "created_at": "2026-03-30T16:00:56.718365Z"
+    "created_at": "2026-07-15T10:30:00Z"
   },
   {
-    "incident_id": "INC-399C87D6",
-    "service": "faulty-project",
-    "metric": "error_rate_per_sec",
-    "issue_type": "application_error",
-    "summary": "[New] faulty-project - application_error in local",
-    "resolution": "No known resolution. Apply suggested runbook actions in dev and validate.",
+    "incident_id": "INC-DEMO0003",
+    "service": "checkout-service",
+    "metric": "dependency_timeout_ms",
+    "issue_type": "dependency_failure",
+    "summary": "[New] checkout-service - dependency_failure in prod",
+    "resolution": "Adjusted upstream timeout and connection pool settings; downstream dependency stabilized.",
     "runbook_actions": [
-      "Inspect recent deployment diff and rollback candidate changes in dev.",
-      "Enable safe-mode feature flags for failing module.",
-      "Validate error-rate drop after config toggle in dev."
+      "Run dependency health check and connection pool diagnostics.",
+      "Update retry/backoff config in dev environment.",
+      "Introduce circuit-breaker threshold adjustments in config."
     ],
-    "created_at": "2026-03-30T16:02:41.821492Z"
+    "created_at": "2026-07-18T14:05:00Z"
   },
   {
-    "incident_id": "INC-F582A9FE",
-    "service": "faulty-project",
-    "metric": "error_rate_per_sec",
-    "issue_type": "application_error",
-    "summary": "[Recurring] faulty-project - application_error in local",
-    "resolution": "No known resolution. Apply suggested runbook actions in dev and validate.",
+    "incident_id": "INC-3DBE2D03",
+    "service": "payments-service",
+    "metric": "latency_p99_ms",
+    "issue_type": "performance_degradation",
+    "summary": "[New] payments-service - performance_degradation in prod",
+    "resolution": "Increased connection pool size and enabled response caching; latency returned to baseline within 15 minutes.",
     "runbook_actions": [
-      "Inspect recent deployment diff and rollback candidate changes in dev.",
-      "Enable safe-mode feature flags for failing module.",
-      "Validate error-rate drop after config toggle in dev."
+      "Check p95/p99 latency breakdown by endpoint in APM.",
+      "Scale service replicas by +1 in dev and verify latency trend.",
+      "Temporarily increase upstream timeout by 10-15% in dev config."
     ],
-    "created_at": "2026-03-30T16:04:26.922785Z"
+    "created_at": "2026-07-23T20:26:09.521988Z"
   },
   {
-    "incident_id": "INC-8F93A4D3",
-    "service": "faulty-project",
-    "metric": "error_rate_per_sec",
-    "issue_type": "application_error",
-    "summary": "[Recurring] faulty-project - application_error in local",
-    "resolution": "No known resolution. Apply suggested runbook actions in dev and validate.",
+    "incident_id": "INC-4EE9FA6E",
+    "service": "payments-service",
+    "metric": "latency_p99_ms",
+    "issue_type": "performance_degradation",
+    "summary": "[New] payments-service - performance_degradation in prod",
+    "resolution": "Increased connection pool size and enabled response caching; latency returned to baseline within 15 minutes.",
     "runbook_actions": [
-      "Inspect recent deployment diff and rollback candidate changes in dev.",
-      "Enable safe-mode feature flags for failing module.",
-      "Validate error-rate drop after config toggle in dev."
+      "Check p95/p99 latency breakdown by endpoint in APM.",
+      "Scale service replicas by +1 in dev and verify latency trend.",
+      "Temporarily increase upstream timeout by 10-15% in dev config."
     ],
-    "created_at": "2026-03-30T16:05:11.952493Z"
+    "created_at": "2026-07-23T20:27:27.812288Z"
   },
   {
-    "incident_id": "INC-12E460B3",
-    "service": "faulty-project",
-    "metric": "error_rate_per_sec",
-    "issue_type": "application_error",
-    "summary": "[Recurring] faulty-project - application_error in local",
-    "resolution": "No known resolution. Apply suggested runbook actions in dev and validate.",
+    "incident_id": "INC-CE415A86",
+    "service": "payments-service",
+    "metric": "latency_p99_ms",
+    "issue_type": "performance_degradation",
+    "summary": "[New] payments-service - performance_degradation in prod",
+    "resolution": "Increased connection pool size and enabled response caching; latency returned to baseline within 15 minutes.",
     "runbook_actions": [
-      "Inspect recent deployment diff and rollback candidate changes in dev.",
-      "Enable safe-mode feature flags for failing module.",
-      "Validate error-rate drop after config toggle in dev."
+      "Check p95/p99 latency breakdown by endpoint in APM.",
+      "Scale service replicas by +1 in dev and verify latency trend.",
+      "Temporarily increase upstream timeout by 10-15% in dev config."
     ],
-    "created_at": "2026-03-30T16:06:57.051375Z"
+    "created_at": "2026-07-23T20:27:47.433890Z"
   },
   {
-    "incident_id": "INC-23944660",
-    "service": "faulty-project",
-    "metric": "error_rate_per_sec",
-    "issue_type": "application_error",
-    "summary": "[Recurring] faulty-project - application_error in local",
-    "resolution": "No known resolution. Apply suggested runbook actions in dev and validate.",
+    "incident_id": "INC-217903CB",
+    "service": "payments-service",
+    "metric": "latency_p99_ms",
+    "issue_type": "performance_degradation",
+    "summary": "[Recurring] payments-service - performance_degradation in prod",
+    "resolution": "Increased connection pool size and enabled response caching; latency returned to baseline within 15 minutes.",
     "runbook_actions": [
-      "Inspect recent deployment diff and rollback candidate changes in dev.",
-      "Enable safe-mode feature flags for failing module.",
-      "Validate error-rate drop after config toggle in dev."
+      "Check p95/p99 latency breakdown by endpoint in APM.",
+      "Scale service replicas by +1 in dev and verify latency trend.",
+      "Temporarily increase upstream timeout by 10-15% in dev config."
     ],
-    "created_at": "2026-03-30T16:09:42.296423Z"
-  },
-  {
-    "incident_id": "INC-466170E8",
-    "service": "faulty-project",
-    "metric": "error_rate_per_sec",
-    "issue_type": "application_error",
-    "summary": "[Recurring] faulty-project - application_error in local",
-    "resolution": "No known resolution. Apply suggested runbook actions in dev and validate.",
-    "runbook_actions": [
-      "Inspect recent deployment diff and rollback candidate changes in dev.",
-      "Enable safe-mode feature flags for failing module.",
-      "Validate error-rate drop after config toggle in dev."
-    ],
-    "created_at": "2026-03-30T16:13:27.545897Z"
-  },
-  {
-    "incident_id": "INC-BF3CCEA9",
-    "service": "faulty-project",
-    "metric": "error_rate_per_sec",
-    "issue_type": "application_error",
-    "summary": "[Recurring] faulty-project - application_error in local",
-    "resolution": "No known resolution. Apply suggested runbook actions in dev and validate.",
-    "runbook_actions": [
-      "Inspect recent deployment diff and rollback candidate changes in dev.",
-      "Enable safe-mode feature flags for failing module.",
-      "Validate error-rate drop after config toggle in dev."
-    ],
-    "created_at": "2026-03-30T16:15:42.679418Z"
-  },
-  {
-    "incident_id": "INC-7FD8659B",
-    "service": "faulty-project",
-    "metric": "error_rate_per_sec",
-    "issue_type": "application_error",
-    "summary": "[Recurring] faulty-project - application_error in local",
-    "resolution": "No known resolution. Apply suggested runbook actions in dev and validate.",
-    "runbook_actions": [
-      "Inspect recent deployment diff and rollback candidate changes in dev.",
-      "Enable safe-mode feature flags for failing module.",
-      "Validate error-rate drop after config toggle in dev."
-    ],
-    "created_at": "2026-03-30T16:17:57.784525Z"
-  },
-  {
-    "incident_id": "INC-8148E3EC",
-    "service": "faulty-project",
-    "metric": "error_rate_per_sec",
-    "issue_type": "application_error",
-    "summary": "[Recurring] faulty-project - application_error in local",
-    "resolution": "No known resolution. Apply suggested runbook actions in dev and validate.",
-    "runbook_actions": [
-      "Inspect recent deployment diff and rollback candidate changes in dev.",
-      "Enable safe-mode feature flags for failing module.",
-      "Validate error-rate drop after config toggle in dev."
-    ],
-    "created_at": "2026-03-30T16:20:27.936404Z"
-  },
-  {
-    "incident_id": "INC-428DB1E8",
-    "service": "faulty-project",
-    "metric": "error_rate_per_sec",
-    "issue_type": "application_error",
-    "summary": "[Recurring] faulty-project - application_error in local",
-    "resolution": "No known resolution. Apply suggested runbook actions in dev and validate.",
-    "runbook_actions": [
-      "Inspect recent deployment diff and rollback candidate changes in dev.",
-      "Enable safe-mode feature flags for failing module.",
-      "Validate error-rate drop after config toggle in dev."
-    ],
-    "created_at": "2026-03-30T16:22:13.069438Z"
+    "created_at": "2026-07-23T20:27:50.520190Z"
   }
 ]

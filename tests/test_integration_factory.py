@@ -1,5 +1,8 @@
-﻿from app.config import Settings
+﻿import pytest
+
+from app.config import Settings
 from app.services.integration_factory import (
+    IntegrationConfigError,
     build_apm_alert_source,
     build_apm_client,
     build_jenkins_client,
@@ -26,6 +29,10 @@ def _base_settings() -> Settings:
         code_change_max_lines=200,
         code_change_auto_commit=False,
         code_change_auto_push=False,
+        code_fix_mode="template",
+        code_fix_target_path="faulty_project/app_config.json",
+        code_fix_max_latency_ms=300.0,
+        code_fix_max_error_probability=0.02,
         apm_poll_mode="off",
         apm_poll_interval_seconds=30,
         apm_alerts_mode="mock",
@@ -33,12 +40,7 @@ def _base_settings() -> Settings:
         apm_alerts_dynatrace_token="",
         apm_alerts_timeout_seconds=10,
         apm_alert_queue_file="data/apm_alert_queue.json",
-        auto_remediation_mode="assistive",
-        safe_auto_issue_types=["PERFORMANCE_DEGRADATION", "DEPENDENCY_FAILURE"],
-        auto_promote_on_policy_pass=False,
         scheduler_actor="scheduler-agent",
-        scheduler_approver_actor="scheduler-approver",
-        scheduler_release_actor="scheduler-release",
         scheduler_dedup_file="data/processed_alerts.json",
         test_evidence_mode="mock",
         test_evidence_command="python -m pytest -q tests",
@@ -70,7 +72,7 @@ def _base_settings() -> Settings:
         require_dev_smoke_tests=True,
         min_confidence_for_prod=0.80,
         require_zero_warnings_for_prod=True,
-        allowed_jenkins_states_for_prod=["QUEUED", "SUCCESS"],
+        allowed_jenkins_states_for_prod=["SUCCESS"],
         auth_enabled=True,
         auth_mode="api_key",
         viewer_api_key="viewer-key",
@@ -107,11 +109,10 @@ def test_factory_uses_mock_by_default():
     assert pr_mode == "mock"
 
 
-def test_factory_startup_fallback_when_real_config_missing():
-    settings = _base_settings()
-    settings = Settings(
+def _misconfigured_real_settings(**overrides) -> Settings:
+    return Settings(
         **{
-            **settings.__dict__,
+            **_base_settings().__dict__,
             "jira_mode": "real",
             "jenkins_mode": "real",
             "apm_mode": "http",
@@ -122,8 +123,43 @@ def test_factory_startup_fallback_when_real_config_missing():
             "llm_api_key": "",
             "pr_mode": "github",
             "pr_github_token": "",
+            **overrides,
         }
     )
+
+
+@pytest.mark.parametrize(
+    "builder",
+    [
+        lambda s: build_jira_client(s),
+        lambda s: build_jenkins_client(s),
+        lambda s: build_apm_client(s),
+        lambda s: build_apm_alert_source(s, "C:/tmp"),
+        lambda s: build_llm_client(s),
+        lambda s: build_pr_client(s),
+    ],
+)
+def test_real_mode_that_cannot_start_fails_loudly_by_default(builder):
+    with pytest.raises(IntegrationConfigError, match="ALLOW_MOCK_FALLBACK"):
+        builder(_misconfigured_real_settings())
+
+
+def test_llm_client_is_built_for_code_fix_even_when_triage_is_heuristic():
+    settings = Settings(
+        **{
+            **_base_settings().__dict__,
+            "triage_mode": "heuristic",
+            "code_fix_mode": "llm",
+            "llm_api_key": "key",
+        }
+    )
+    client, triage_mode = build_llm_client(settings)
+    assert client is not None
+    assert triage_mode == "heuristic"
+
+
+def test_factory_startup_fallback_only_when_explicitly_allowed():
+    settings = _misconfigured_real_settings(allow_mock_fallback=True)
 
     _, alert_mode = build_apm_alert_source(settings, "C:/tmp")
     _, jira_mode = build_jira_client(settings)

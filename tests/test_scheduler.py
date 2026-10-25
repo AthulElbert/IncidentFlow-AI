@@ -3,14 +3,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.adapters.apm_alert_source import MockAPMAlertSource
-from app.adapters.apm_client import MockAPMClient
 from app.adapters.jenkins_client import MockJenkinsClient
 from app.adapters.jira_client import MockJiraClient
-from app.adapters.pr_client import MockPRClient
 from app.services.change_control import ChangeControlStore
-from app.services.dev_fix_executor import DevFixExecutor
 from app.services.pipeline import SupportAgentPipeline
-from app.services.pr_preparer import PRPreparationService
 from app.services.scheduler import AlertDedupStore, IncidentScheduler
 from app.services.triage_agent import TriageAgent
 
@@ -50,28 +46,22 @@ def test_scheduler_run_once_processes_and_dedups_alerts(tmp_path: Path):
     scheduler = IncidentScheduler(
         alert_source=MockAPMAlertSource(str(queue_file)),
         pipeline=pipeline,
-        change_store=change_store,
-        pr_preparer=PRPreparationService(
-            pr_client=MockPRClient(),
-            test_mode="mock",
-            repo_root=str(tmp_path),
-            code_change_mode="spec",
-        ),
-        dev_executor=DevFixExecutor(
-            jenkins_client=MockJenkinsClient(),
-            apm_client=MockAPMClient(),
-            min_apm_improvement_pct=5.0,
-            require_smoke_tests=True,
-        ),
-        jenkins_client=MockJenkinsClient(),
         dedup_store=AlertDedupStore(str(dedup_file)),
         poll_interval_seconds=30,
-        auto_remediation_mode="assistive",
     )
 
     scheduler.run_once()
-    assert len(change_store.list_changes()) == 1
+    changes = change_store.list_changes()
+    assert len(changes) == 1
+    # Intake only: the scheduler must never approve, execute or promote on its own.
+    assert changes[0].status == "pending_approval"
+    assert changes[0].deployment_state == "awaiting_dev_execution"
+    assert changes[0].pr_status == "not_started"
+    assert changes[0].decided_by is None
+    assert changes[0].promoted_by is None
 
     # Same queue item should be deduped on second cycle.
-    scheduler.run_once()
+    status = scheduler.run_once()
     assert len(change_store.list_changes()) == 1
+    assert status["stats"]["alerts_skipped_dedup"] == 1
+    assert "auto_remediation_mode" not in status

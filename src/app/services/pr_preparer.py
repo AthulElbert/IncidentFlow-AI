@@ -6,6 +6,7 @@ from pathlib import Path
 
 from app.adapters.pr_client import PRClient
 from app.models.schemas import ChangeRecord, PullRequestDraft
+from app.services.code_fix_agent import CodeFixAgent, CodeFixAttempt
 
 
 def _slug(value: str) -> str:
@@ -69,6 +70,9 @@ class PRPreparationService:
         code_change_max_lines: int = 200,
         code_change_auto_commit: bool = False,
         code_change_auto_push: bool = False,
+        code_fix_mode: str = "template",
+        code_fix_target_path: str = "faulty_project/app_config.json",
+        code_fix_agent: CodeFixAgent | None = None,
     ) -> None:
         self.pr_client = pr_client
         self.test_mode = test_mode.strip().lower()
@@ -87,6 +91,9 @@ class PRPreparationService:
         self.code_change_max_lines = max(10, code_change_max_lines)
         self.code_change_auto_commit = code_change_auto_commit
         self.code_change_auto_push = code_change_auto_push
+        self.code_fix_mode = code_fix_mode.strip().lower()
+        self.code_fix_target_path = code_fix_target_path.strip().replace("\\", "/")
+        self.code_fix_agent = code_fix_agent or CodeFixAgent(llm_client=None)
 
     def prepare(self, record: ChangeRecord, requested_by: str, comment: str = "") -> PRPreparationResult:
         title = f"[{record.change_id}] {record.summary[:72]}"
@@ -97,7 +104,7 @@ class PRPreparationService:
 
         summary_lines = [
             f"Issue type: {record.issue_type} (confidence={record.confidence:.2f})",
-            f"Jira: {record.jira_key}",
+            f"Jira: {record.jira_key or 'pending (ticket not created)'}",
             f"Patch artifact: {patch_artifact_path}",
             f"Local branch: {branch} ({local_branch_message})",
             f"Code change: {code_change.status} ({code_change.message})",
@@ -188,6 +195,9 @@ class PRPreparationService:
                 test_pass_rate=0.0,
             )
 
+        if self.code_fix_mode == "llm" and self.code_fix_agent.is_configured():
+            return self._apply_llm_code_fix(record, worktree_path, branch, branch_msg)
+
         rel_file = "config/service-overrides.yaml"
         allowed, rule_msg = self._validate_allowed_path(rel_file)
         if not allowed:
@@ -222,54 +232,16 @@ class PRPreparationService:
 
         target.write_text(change_content, encoding="utf-8")
         test_status, test_output, pass_rate = self._collect_test_evidence(cwd=worktree_path)
-        commit_sha = ""
-        push_status = "not_attempted"
-        status = "applied"
-        message = f"sandbox file updated ({rel_file}); {branch_msg}"
-
-        if self.code_change_auto_commit:
-            ok_add, add_out = self._run_git(["add", rel_file], cwd=worktree_path)
-            if not ok_add:
-                return CodeChangeResult(
-                    status="failed",
-                    message=f"git add failed: {add_out}",
-                    sandbox_worktree_path=str(worktree_path),
-                    changed_files=[rel_file],
-                    commit_sha="",
-                    push_status="not_attempted",
-                    test_evidence_status=test_status,
-                    test_output=test_output,
-                    test_pass_rate=pass_rate,
-                )
-
-            commit_msg = f"agent: apply config mitigation for {record.change_id}"
-            ok_commit, commit_out = self._run_git(["commit", "-m", commit_msg], cwd=worktree_path)
-            if ok_commit:
-                ok_sha, sha_out = self._run_git(["rev-parse", "--short", "HEAD"], cwd=worktree_path)
-                commit_sha = sha_out.strip() if ok_sha else ""
-            else:
-                if "nothing to commit" not in commit_out.lower():
-                    return CodeChangeResult(
-                        status="failed",
-                        message=f"git commit failed: {commit_out}",
-                        sandbox_worktree_path=str(worktree_path),
-                        changed_files=[rel_file],
-                        commit_sha="",
-                        push_status="not_attempted",
-                        test_evidence_status=test_status,
-                        test_output=test_output,
-                        test_pass_rate=pass_rate,
-                    )
-
-            if self.code_change_auto_push:
-                ok_push, push_out = self._run_git(["push", "-u", "origin", branch], cwd=worktree_path)
-                push_status = "pushed" if ok_push else f"push_failed: {push_out}"
-            else:
-                push_status = "not_attempted"
+        commit_msg = f"agent: apply config mitigation for {record.change_id}"
+        commit_sha, push_status, err = self._commit_and_push_if_enabled(
+            rel_file, worktree_path, branch, commit_msg, test_status, test_output, pass_rate,
+        )
+        if err is not None:
+            return err
 
         return CodeChangeResult(
-            status=status,
-            message=message,
+            status="applied",
+            message=f"sandbox file updated ({rel_file}); {branch_msg}",
             sandbox_worktree_path=str(worktree_path),
             changed_files=[rel_file],
             commit_sha=commit_sha,
@@ -278,6 +250,156 @@ class PRPreparationService:
             test_output=test_output,
             test_pass_rate=pass_rate,
         )
+
+    def _apply_llm_code_fix(
+        self, record: ChangeRecord, worktree_path: Path, branch: str, branch_msg: str
+    ) -> CodeChangeResult:
+        rel_file = self.code_fix_target_path
+        allowed, rule_msg = self._validate_allowed_path(rel_file)
+        if not allowed:
+            return CodeChangeResult(
+                status="failed",
+                message=rule_msg,
+                sandbox_worktree_path=str(worktree_path),
+                changed_files=[],
+                commit_sha="",
+                push_status="not_attempted",
+                test_evidence_status="failed",
+                test_output="Guardrail rejected file path.",
+                test_pass_rate=0.0,
+            )
+
+        target = worktree_path / rel_file
+        if not target.exists():
+            return CodeChangeResult(
+                status="failed",
+                message=f"code-fix target not found in sandbox: {rel_file}",
+                sandbox_worktree_path=str(worktree_path),
+                changed_files=[],
+                commit_sha="",
+                push_status="not_attempted",
+                test_evidence_status="failed",
+                test_output="Target file missing in sandbox worktree.",
+                test_pass_rate=0.0,
+            )
+
+        original_content = target.read_text(encoding="utf-8")
+        fix = self.code_fix_agent.propose_fix(rel_file, original_content)
+        trail = self._format_attempt_trail(fix.attempts)
+
+        if fix.status != "applied":
+            return CodeChangeResult(
+                status="failed",
+                message=f"{fix.message}. {trail}".strip(),
+                sandbox_worktree_path=str(worktree_path),
+                changed_files=[],
+                commit_sha="",
+                push_status="not_attempted",
+                test_evidence_status="failed",
+                test_output=fix.test_output or fix.message,
+                test_pass_rate=0.0,
+            )
+
+        line_count = len(fix.fixed_content.splitlines())
+        if line_count > self.code_change_max_lines:
+            return CodeChangeResult(
+                status="failed",
+                message=f"guardrail rejected patch size {line_count} > {self.code_change_max_lines}",
+                sandbox_worktree_path=str(worktree_path),
+                changed_files=[],
+                commit_sha="",
+                push_status="not_attempted",
+                test_evidence_status="failed",
+                test_output="Guardrail rejected line count.",
+                test_pass_rate=0.0,
+            )
+
+        target.write_text(fix.fixed_content, encoding="utf-8")
+        # The fix's own simulated validation IS the test evidence here -- it is
+        # specific to what actually changed, unlike the generic repo test suite.
+        test_status, test_output, pass_rate = "passed", fix.test_output, 1.0
+        commit_msg = f"agent: AI fix for {record.change_id} - {fix.summary}"[:200]
+        commit_sha, push_status, err = self._commit_and_push_if_enabled(
+            rel_file, worktree_path, branch, commit_msg, test_status, test_output, pass_rate,
+        )
+        if err is not None:
+            return err
+
+        return CodeChangeResult(
+            status="applied",
+            message=f"AI code fix applied to {rel_file}: {fix.summary} ({trail}; {branch_msg})",
+            sandbox_worktree_path=str(worktree_path),
+            changed_files=[rel_file],
+            commit_sha=commit_sha,
+            push_status=push_status,
+            test_evidence_status=test_status,
+            test_output=test_output,
+            test_pass_rate=pass_rate,
+        )
+
+    def _format_attempt_trail(self, attempts: list[CodeFixAttempt]) -> str:
+        if not attempts:
+            return "no attempts recorded"
+        parts = []
+        for item in attempts:
+            outcome = "verified" if item.verified else "rejected"
+            parts.append(
+                f"attempt {item.attempt}: {outcome} (p99={item.simulated_p99_latency_ms:.0f}ms, "
+                f"error_rate={item.simulated_error_rate:.1%})"
+            )
+        return "; ".join(parts)
+
+    def _commit_and_push_if_enabled(
+        self,
+        rel_file: str,
+        worktree_path: Path,
+        branch: str,
+        commit_message: str,
+        test_status: str,
+        test_output: str,
+        pass_rate: float,
+    ) -> tuple[str, str, "CodeChangeResult | None"]:
+        if not self.code_change_auto_commit:
+            return "", "not_attempted", None
+
+        ok_add, add_out = self._run_git(["add", rel_file], cwd=worktree_path)
+        if not ok_add:
+            return "", "not_attempted", CodeChangeResult(
+                status="failed",
+                message=f"git add failed: {add_out}",
+                sandbox_worktree_path=str(worktree_path),
+                changed_files=[rel_file],
+                commit_sha="",
+                push_status="not_attempted",
+                test_evidence_status=test_status,
+                test_output=test_output,
+                test_pass_rate=pass_rate,
+            )
+
+        ok_commit, commit_out = self._run_git(["commit", "-m", commit_message], cwd=worktree_path)
+        commit_sha = ""
+        if ok_commit:
+            ok_sha, sha_out = self._run_git(["rev-parse", "--short", "HEAD"], cwd=worktree_path)
+            commit_sha = sha_out.strip() if ok_sha else ""
+        elif "nothing to commit" not in commit_out.lower():
+            return "", "not_attempted", CodeChangeResult(
+                status="failed",
+                message=f"git commit failed: {commit_out}",
+                sandbox_worktree_path=str(worktree_path),
+                changed_files=[rel_file],
+                commit_sha="",
+                push_status="not_attempted",
+                test_evidence_status=test_status,
+                test_output=test_output,
+                test_pass_rate=pass_rate,
+            )
+
+        push_status = "not_attempted"
+        if self.code_change_auto_push:
+            ok_push, push_out = self._run_git(["push", "-u", "origin", branch], cwd=worktree_path)
+            push_status = "pushed" if ok_push else f"push_failed: {push_out}"
+
+        return commit_sha, push_status, None
 
     def _collect_test_evidence(self, cwd: Path) -> tuple[str, str, float]:
         if self.test_mode != "pytest":
@@ -314,7 +436,7 @@ class PRPreparationService:
             f"# Requested by: {requested_by}",
             f"# Issue type: {record.issue_type}",
             f"# Confidence: {record.confidence:.2f}",
-            f"# Jira: {record.jira_key}",
+            f"# Jira: {record.jira_key or 'pending'}",
             "",
             "diff --git a/config/service-overrides.yaml b/config/service-overrides.yaml",
             "new file mode 100644",

@@ -4,3 +4,4 @@ __pycache__/
 .env
 eval/triage_eval_report.json
 generated_patches/
+.agent_worktrees/
