@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.encoders import jsonable_encoder
 from fastapi.responses import FileResponse, JSONResponse
 
 from app.adapters.jenkins_client import wait_for_build
@@ -47,6 +48,7 @@ from app.services.integration_factory import (
 from app.services.metrics import build_metrics_summary
 from app.services.pipeline import SupportAgentPipeline
 from app.services.pr_preparer import PRPreparationService
+from app.services.review import build_review, overview_row
 from app.services.scheduler import AlertDedupStore, IncidentScheduler
 from app.services.triage_agent import TriageAgent
 from app.storage import atomic_write_text
@@ -386,6 +388,34 @@ def process_mock_incident(
 def list_changes(status: str | None = Query(default=None), principal: Principal = Depends(viewer_auth)) -> list[ChangeRecord]:
     _ = principal
     return change_store.list_changes(status=status)
+
+
+@app.get("/v1/whoami")
+def whoami(principal: Principal = Depends(viewer_auth)) -> dict:
+    """Who the credentials in this request belong to, so a screen can tell whether two actions are by the same person."""
+    return {"actor": principal.actor, "role": principal.role}
+
+
+@app.get("/v1/changes/overview")
+def changes_overview(
+    limit: int = Query(default=50, ge=1, le=200),
+    principal: Principal = Depends(viewer_auth),
+) -> list[dict]:
+    """A small row per change, newest first. Cheap enough to poll; `version` changes when anything about the change does."""
+    _ = principal
+    changes = sorted(change_store.list_changes(), key=lambda item: item.created_at, reverse=True)
+    return [overview_row(item) for item in changes[:limit]]
+
+
+@app.get("/v1/changes/{change_id}/review")
+def get_change_review(change_id: str, principal: Principal = Depends(viewer_auth)) -> dict:
+    """Everything a person needs to decide about a change: the diagnosis, the fix and its checks, open actions, a timeline."""
+    _ = principal
+    record = change_store.get_change(change_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Change not found")
+    entries = audit_log.list(entity_id=change_id, limit=500)
+    return jsonable_encoder(build_review(record, entries, change_store, settings.agent_run_mode))
 
 
 @app.get("/v1/metrics/summary", response_model=MetricsSummary)

@@ -4,64 +4,30 @@ import threading
 import time
 
 import pytest
-from agent_harness import CONFIG_PATH, FIXED, TempRepoProvider, done, edit, make_repo
+
+from agent_harness import (
+    APPROVER,
+    CONFIG_PATH,
+    FIXED,
+    RELEASE,
+    VIEWER,
+    TempRepoProvider,
+    agent_run,
+    done,
+    edit,
+    make_repo,
+    scenario_incident,
+    wait_for_run,
+)
 from fastapi.testclient import TestClient
 from llm_fakes import ScriptedLLM
 
 from app.models.schemas import ChangeRecord
 from app.services.change_control import ChangeControlStore
 
-VIEWER = {"X-API-Key": "viewer-key"}
-APPROVER = {"X-API-Key": "approver-key"}
-RELEASE = {"X-API-Key": "release-key"}
-TERMINAL = {"ready_for_approval", "escalated"}
-
-
-class ExplodingProvider:
-    """Any attempt to create a real worktree in a test is a bug: it would create a branch in the real repo."""
-
-    def open(self, branch):
-        raise AssertionError(f"a real worktree was requested for {branch}")
-
-
-@pytest.fixture
-def make_app(monkeypatch, tmp_path):
-    def _make(**env):
-        monkeypatch.setenv("VIEWER_API_KEY", "viewer-key")
-        monkeypatch.setenv("APPROVER_API_KEY", "approver-key")
-        monkeypatch.setenv("RELEASE_OPERATOR_API_KEY", "release-key")
-        monkeypatch.setenv("VERIFIER_POLL_INTERVAL_SECONDS", "0.01")
-        monkeypatch.setenv("MOCK_JENKINS_POLLS", "0")
-        monkeypatch.setenv("CODE_CHANGE_ALLOWED_PATHS", "faulty_project/,config/,src/")
-        for key, value in env.items():
-            monkeypatch.setenv(key, str(value))
-        import app.main as main_module
-
-        main_module = importlib.reload(main_module)
-        main_module.agent_runtime.sandbox_provider = ExplodingProvider()
-        return main_module, TestClient(main_module.app)
-
-    return _make
-
-
-def _scenario_incident(client, name="bad_config_latency"):
-    response = client.post(f"/v1/incidents/scenario/{name}", headers=APPROVER)
-    assert response.status_code == 200, response.text
-    return response.json()["metadata"]["change_id"]
-
-
-def _agent_run(client, change_id):
-    return client.get(f"/v1/changes/{change_id}/agent-run", headers=VIEWER).json()
-
-
-def _wait(client, change_id, timeout=20.0):
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        run = _agent_run(client, change_id)
-        if run["agent_run_status"] in TERMINAL:
-            return run
-        time.sleep(0.05)
-    raise AssertionError(f"the agent run did not finish: {_agent_run(client, change_id)}")
+_scenario_incident = scenario_incident
+_agent_run = agent_run
+_wait = wait_for_run
 
 
 # --- off (the default) ---------------------------------------------------------------------

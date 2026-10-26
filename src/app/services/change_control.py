@@ -23,6 +23,29 @@ from app.storage import atomic_write_text
 logger = logging.getLogger("app.change_control")
 
 _PROMOTION_TERMINAL_STATES = {"promoted_to_prod", "prod_promotion_failed"}
+_AGENT_START_STATES = {"awaiting_dev_execution", "escalated"}
+
+
+def agent_start_blocker(record: ChangeRecord) -> str | None:
+    """Why an agent run cannot start on this change right now, or None. `begin_agent_run` and the dashboard share it."""
+    if record.agent_run_status == "running":
+        return "An agent run is already in progress for this change"
+    if record.status != "pending_approval":
+        return "Change decision already finalized"
+    if not record.alert:
+        return "No alert was recorded for this change, so there is nothing to investigate"
+    if record.deployment_state not in _AGENT_START_STATES:
+        return f"Agents cannot start from state {record.deployment_state}"
+    return None
+
+
+def decision_blocker(record: ChangeRecord, decision: str) -> str | None:
+    """Why this decision cannot be recorded right now, or None. A policy failure is not a blocker: it is recorded."""
+    if record.status != "pending_approval":
+        return "Change is already decided"
+    if decision == "approve" and record.deployment_state != "ready_for_prod":
+        return "Change is not ready for approval; execute dev fix first"
+    return None
 # A change in one of these states is finished (or being deployed) and must not absorb new alerts.
 _CLOSED_FOR_CORRELATION = TERMINAL_STATES | _PROMOTION_TERMINAL_STATES | {"promoting", "monitoring"}
 
@@ -338,14 +361,9 @@ class ChangeControlStore:
         """Reserve the change for one agent run. Refuses a second concurrent or finished run."""
 
         def apply(record: ChangeRecord) -> ChangeRecord:
-            if record.agent_run_status == "running":
-                raise ValueError("An agent run is already in progress for this change")
-            if record.status != "pending_approval":
-                raise ValueError("Change decision already finalized")
-            if not record.alert:
-                raise ValueError("No alert was recorded for this change, so there is nothing to investigate")
-            if record.deployment_state not in {"awaiting_dev_execution", "escalated"}:
-                raise ValueError(f"Agents cannot start from state {record.deployment_state}")
+            blocker = agent_start_blocker(record)
+            if blocker:
+                raise ValueError(blocker)
             runs = int(record.agent_run.get("run", 0)) + 1
             return record.model_copy(
                 update={
@@ -367,6 +385,7 @@ class ChangeControlStore:
         issue_type: str | None = None,
         confidence: float | None = None,
         escalation_reason: str = "",
+        note: str = "",
     ) -> ChangeRecord:
         """Move a running agent workflow to its next state and record what the agent produced."""
         if to_state not in self._AGENT_STATES:
@@ -395,7 +414,11 @@ class ChangeControlStore:
             apply,
             action=action,
             actor=actor,
-            details={"to_state": to_state, **({"reason": escalation_reason} if escalation_reason else {})},
+            details={
+                "to_state": to_state,
+                **({"reason": escalation_reason} if escalation_reason else {}),
+                **({"note": note} if note else {}),
+            },
         )
 
     def finish_agent_run(
@@ -458,8 +481,9 @@ class ChangeControlStore:
         decided_by: str,
     ) -> ChangeRecord:
         def apply(record: ChangeRecord) -> ChangeRecord:
-            if record.status != "pending_approval":
-                raise ValueError("Change is already decided")
+            blocker = decision_blocker(record, payload.decision)
+            if blocker:
+                raise ValueError(blocker)
 
             decided_at = datetime.now(timezone.utc)
 
@@ -473,9 +497,6 @@ class ChangeControlStore:
                         "decision_comment": payload.comment,
                     }
                 )
-
-            if record.deployment_state != "ready_for_prod":
-                raise ValueError("Change is not ready for approval; execute dev fix first")
 
             reasons = self._evaluate_policy(record)
             return record.model_copy(
@@ -498,6 +519,32 @@ class ChangeControlStore:
             details={"comment": payload.comment},
         )
 
+    def promotion_blocker(self, record: ChangeRecord, promoted_by: str | None = None) -> str | None:
+        """Why this change cannot be promoted now, or None. With `promoted_by` it also applies separation of duties."""
+        if record.deployment_state == "promoting":
+            return "Change is already being promoted"
+        if record.deployment_state in _PROMOTION_TERMINAL_STATES:
+            return "Change already promoted"
+        if record.status != "approved":
+            return "Change must be approved before promotion"
+        if record.deployment_state != "ready_for_prod":
+            return "Change is not ready_for_prod"
+        if (
+            promoted_by is not None
+            and self.policy.enforce_separation_of_duties
+            and record.decided_by
+            and record.decided_by == promoted_by
+        ):
+            return "Promotion requires a different actor than the approver"
+        reasons = self._evaluate_policy(record)
+        if reasons:
+            return "Promotion blocked by policy: " + "; ".join(reasons)
+        return None
+
+    def policy_reasons(self, record: ChangeRecord) -> list[str]:
+        """What the policy gate would say about this change right now (empty means it passes)."""
+        return self._evaluate_policy(record)
+
     def begin_promotion(self, change_id: str, payload: PromoteRequest, promoted_by: str) -> ChangeRecord:
         """Validate and reserve a promotion BEFORE any deploy is triggered.
 
@@ -506,25 +553,9 @@ class ChangeControlStore:
         """
 
         def apply(record: ChangeRecord) -> ChangeRecord:
-            if record.deployment_state == "promoting":
-                raise ValueError("Change is already being promoted")
-            if record.deployment_state in _PROMOTION_TERMINAL_STATES:
-                raise ValueError("Change already promoted")
-            if record.status != "approved":
-                raise ValueError("Change must be approved before promotion")
-            if record.deployment_state != "ready_for_prod":
-                raise ValueError("Change is not ready_for_prod")
-
-            if (
-                self.policy.enforce_separation_of_duties
-                and record.decided_by
-                and record.decided_by == promoted_by
-            ):
-                raise ValueError("Promotion requires a different actor than the approver")
-
-            reasons = self._evaluate_policy(record)
-            if reasons:
-                raise ValueError("Promotion blocked by policy: " + "; ".join(reasons))
+            blocker = self.promotion_blocker(record, promoted_by)
+            if blocker:
+                raise ValueError(blocker)
 
             return record.model_copy(
                 update={

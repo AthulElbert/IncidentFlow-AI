@@ -13,6 +13,7 @@ promoting are not reachable from here.
 
 Any unexpected exception in a node ends the run in `escalated` rather than leaving the change stuck.
 """
+import hashlib
 import logging
 import re
 from dataclasses import dataclass, field
@@ -35,6 +36,16 @@ logger = logging.getLogger("app.agent_graph")
 
 ORCHESTRATOR = "agent:orchestrator"
 VERIFIER_ACTOR = "agent:verifier"
+MAX_STORED_DIFF_CHARS = 40_000
+
+
+def stored_diff(text: str) -> dict:
+    """The diff a person will be asked to approve, kept on the change. The hash covers the whole diff, even if the text is cut."""
+    return {
+        "text": text[:MAX_STORED_DIFF_CHARS],
+        "truncated": len(text) > MAX_STORED_DIFF_CHARS,
+        "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+    }
 
 
 class SandboxProvider(Protocol):
@@ -125,7 +136,8 @@ def build_incident_graph(runtime: AgentRuntime, checkpointer: Any | None = None)
         fields = {"issue_type": top.issue_type, "confidence": top.confidence} if top else {}
         if report.decision == "proceed":
             store.record_agent_step(
-                change_id, "agent:investigator", "hypothesis_ready", "agent.investigated", {"investigation": dump}, **fields
+                change_id, "agent:investigator", "hypothesis_ready", "agent.investigated", {"investigation": dump},
+                note=f"{top.issue_type}, confidence {top.confidence:.2f}" if top else "", **fields,
             )
             return {"investigation": dump, "next_step": "fix"}
         return {
@@ -143,7 +155,9 @@ def build_incident_graph(runtime: AgentRuntime, checkpointer: Any | None = None)
         if sandbox is not None and attempt > 1:
             sandbox.reset()  # every attempt starts from the original code, with the feedback in hand
 
-        store.record_agent_step(change_id, ORCHESTRATOR, "fixing", "agent.fixing", {"attempts": state.get("attempts", [])})
+        store.record_agent_step(
+            change_id, ORCHESTRATOR, "fixing", "agent.fixing", {"attempts": state.get("attempts", [])}, note=f"attempt {attempt}"
+        )
         tools = runtime.toolkit.for_agent("fixer", entity_id=change_id, audit=runtime.audit, sandbox=sandbox)
         result = runtime.fixer.propose(
             ctx, investigation.hypotheses[0], investigation.evidence, tools,
@@ -186,7 +200,9 @@ def build_incident_graph(runtime: AgentRuntime, checkpointer: Any | None = None)
             "alert_metric": report.alert_metric,
         }
         patch = {"verification": dump, "attempts": attempts}
-        store.record_agent_step(change_id, "agent:verifier", "verifying", "agent.verified", patch)
+        store.record_agent_step(
+            change_id, "agent:verifier", "verifying", "agent.verified", patch, note=f"attempt {attempt}: {report.verdict}"
+        )
 
         if report.verdict == "passed":
             return {"verification": dump, "attempts": attempts, "next_step": "review"}
@@ -216,7 +232,10 @@ def build_incident_graph(runtime: AgentRuntime, checkpointer: Any | None = None)
             "concerns": [{"severity": c.severity, "text": c.text} for c in review_.concerns],
         }
         patch = {"review": dump, "attempts": attempts}
-        store.record_agent_step(change_id, "agent:critic", "reviewing", "agent.reviewed", patch)
+        store.record_agent_step(
+            change_id, "agent:critic", "reviewing", "agent.reviewed", patch,
+            note=f"attempt {attempt}: {review_.decision}, risk {review_.risk}",
+        )
 
         if review_.decision == "approve_for_human":
             return {"review": dump, "attempts": attempts, "next_step": "package"}
@@ -241,9 +260,13 @@ def build_incident_graph(runtime: AgentRuntime, checkpointer: Any | None = None)
             f"(alert metric {verification.alert_metric.get('before')} -> {verification.alert_metric.get('after')}, "
             f"threshold {verification.alert_metric.get('threshold')}); critic: {review_['decision']}, risk {review_['risk']}"
         )
+        # The approver must be able to see exactly what was verified; if the diff cannot be read the run
+        # fails (and escalates) rather than offering a change nobody can inspect.
+        diff = runtime.sandbox_for(state["change_id"], state["branch"]).diff()
         patch = {
             "outcome": "ready_for_approval",
             "branch": state["branch"],
+            "diff": stored_diff(diff),
             "changed_files": review_.get("changed_files", []),
             "risk": review_["risk"],
             "summary": notes,

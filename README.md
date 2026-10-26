@@ -155,6 +155,9 @@ Open:
 - `POST /v1/scheduler/run-once`
 - `GET /v1/changes`
 - `GET /v1/changes/{change_id}`
+- `GET /v1/changes/overview` (one small row per change, newest first, with what each is waiting for; cheap to poll)
+- `GET /v1/changes/{change_id}/review` (the case file a person decides from: diagnosis, evidence, verified diff, checks, Critic, policy result, which actions are open and why not, and a timeline)
+- `GET /v1/whoami` (the actor and role a key belongs to)
 - `GET /v1/changes/{change_id}/audit` (who did what to this change, oldest first)
 - `GET /v1/audit` (most recent audit entries across all changes)
 - `GET /v1/metrics/summary`
@@ -192,12 +195,14 @@ Notes:
 
 ## Dashboard Demo
 
-`/dashboard` supports:
+`/dashboard` is a working screen for the people in the loop, not only a demo page:
 
-- API key input
-- Metrics refresh
-- Mock incident generation
-- `prepare-pr` trigger by `change_id`
+- **Live list.** The change list and an inbox ("2 awaiting approval, 1 deploying...") update by themselves; click an inbox item to jump to that change. It polls a small overview endpoint (every 1.5s while agents or a deploy are working, otherwise every 4s), pauses while the tab is hidden, and has a Pause button. A change's detail reloads only when that change actually changed.
+- **Approval screen.** When a verified fix waits for a decision it shows the diagnosis, the files and the **diff the agents verified** (with a fingerprint), the Verifier's checks and before/after alert metric, the Critic's risk and concerns, and the policy gate. Approve stays disabled until the reviewer ticks "I have read the diff...". Approving never deploys anything.
+- **Promotion screen.** Shows who approved and why, what is being released, and whether the release key belongs to a different person than the approver. If separation of duties would refuse it, the button is disabled and says so.
+- **Evidence and timeline.** The evidence the Investigator collected (what supports the diagnosis is marked) and a plain-language timeline of everything that happened: agents, people and the platform, with each agent's tool calls folded into one line.
+- **Closed buttons say why.** Run Agents, Approve, Reject, Promote and Refresh Build Status are enabled from what the server would accept, and a closed one shows the reason.
+- Also: API key input, metrics, mock and simulated incidents, scheduler controls, `prepare-pr` and dev validation.
 
 ## One-Command Demo Check
 

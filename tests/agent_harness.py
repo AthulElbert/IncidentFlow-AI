@@ -160,3 +160,40 @@ def build(tmp_path: Path, replies=(), scenario: Scenario = BAD_CONFIG_LATENCY, e
         max_attempts=max_attempts,
     )
     return Harness(root, store, audit, bus, env, runtime, AgentRunner(runtime, workers=workers), llm, provider, change.change_id)
+
+
+# --- driving the real app through its API (used with the `make_app` fixture in conftest.py) ---------
+
+VIEWER = {"X-API-Key": "viewer-key"}
+APPROVER = {"X-API-Key": "approver-key"}
+RELEASE = {"X-API-Key": "release-key"}
+RUN_FINISHED = {"ready_for_approval", "escalated"}
+
+
+class ExplodingProvider:
+    """Any attempt to create a real worktree in a test is a bug: it would create a branch in the real repo."""
+
+    def open(self, branch):
+        raise AssertionError(f"a real worktree was requested for {branch}")
+
+
+def scenario_incident(client, name="bad_config_latency"):
+    response = client.post(f"/v1/incidents/scenario/{name}", headers=APPROVER)
+    assert response.status_code == 200, response.text
+    return response.json()["metadata"]["change_id"]
+
+
+def agent_run(client, change_id):
+    return client.get(f"/v1/changes/{change_id}/agent-run", headers=VIEWER).json()
+
+
+def wait_for_run(client, change_id, timeout=20.0):
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        run = agent_run(client, change_id)
+        if run["agent_run_status"] in RUN_FINISHED:
+            return run
+        time.sleep(0.05)
+    raise AssertionError(f"the agent run did not finish: {agent_run(client, change_id)}")

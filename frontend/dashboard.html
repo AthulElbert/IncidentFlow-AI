@@ -237,6 +237,53 @@
     .policy-list { margin: 6px 0 0; padding-left: 18px; font-size: 0.83rem; color: var(--bad); }
     .policy-ok { color: #166534; font-size: 0.83rem; margin-top: 6px; }
 
+
+    /* Live list, inbox and case file */
+    .live-bar { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; font-size: 0.82rem; color: var(--muted); }
+    .live-dot { width: 9px; height: 9px; border-radius: 50%; background: #94a3b8; display: inline-block; }
+    .live-dot.on { background: #16a34a; box-shadow: 0 0 0 3px #dcfce7; }
+    .live-dot.off { background: var(--bad); box-shadow: 0 0 0 3px #fee2e2; }
+    button.small { padding: 4px 10px; font-size: 0.75rem; }
+    .inbox { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 10px; }
+    .inbox-item { background: #f1f5f9; color: var(--ink); border: 1px solid var(--line); font-weight: 500; }
+    .inbox-item.warn { background: #fef3c7; border-color: #f59e0b; }
+    .inbox-item.bad { background: #fee2e2; border-color: #ef4444; }
+    .inbox-item.info { background: #dbeafe; border-color: #60a5fa; }
+    .pill.info { background: #dbeafe; color: #1e40af; }
+    .banner { margin-top: 14px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--line); background: #f8fafc; font-size: 0.92rem; }
+    .banner.warn { background: #fffbeb; border-color: #fcd34d; }
+    .banner.bad { background: #fef2f2; border-color: #fca5a5; }
+    .banner.ok { background: var(--ok-bg); border-color: #86efac; }
+    .banner.info { background: #eff6ff; border-color: #93c5fd; }
+    .screen { margin-top: 12px; border: 2px solid var(--accent-2); border-radius: 14px; padding: 14px; background: #fbfdff; }
+    .screen h3 { margin: 0 0 10px; font-size: 1rem; }
+    .screen textarea { margin-top: 8px; }
+    .facts { display: grid; gap: 8px; }
+    .fact { display: grid; grid-template-columns: 110px 1fr; gap: 10px; font-size: 0.85rem; }
+    .check { display: inline-block; border-radius: 6px; padding: 1px 7px; font-size: 0.74rem; margin: 1px 2px; background: #e2e8f0; }
+    .check.ok { background: #dcfce7; color: #166534; }
+    .check.warn { background: #fef3c7; color: #92400e; }
+    .check.bad { background: #fee2e2; color: #991b1b; }
+    pre.diff { background: #0f172a; color: #e2e8f0; border-radius: 10px; padding: 10px 0; font-size: 0.76rem; overflow: auto; max-height: 360px; margin: 12px 0 0; }
+    .dl { display: block; padding: 0 12px; white-space: pre; }
+    .dl.add { background: rgba(34, 197, 94, 0.18); color: #bbf7d0; }
+    .dl.del { background: rgba(239, 68, 68, 0.2); color: #fecaca; }
+    .dl.hunk { color: #93c5fd; }
+    .dl.meta { color: #94a3b8; }
+    label.confirm { display: flex; gap: 8px; align-items: flex-start; margin: 12px 0 0; font-size: 0.85rem; }
+    label.confirm input { width: auto; margin-top: 3px; }
+    .section-block { margin-top: 12px; }
+    ul.evidence { list-style: none; padding-left: 0; margin: 6px 0 0; font-size: 0.82rem; }
+    ul.evidence li { padding: 3px 0; border-bottom: 1px dashed var(--line); }
+    ul.evidence li.supports { background: #f0fdf4; }
+    ol.timeline { list-style: none; margin: 8px 0 0 8px; padding: 0; border-left: 2px solid var(--line); }
+    li.tl { display: flex; gap: 8px; padding: 5px 0 5px 10px; font-size: 0.83rem; }
+    .tl-icon { width: 20px; text-align: center; flex: none; }
+    .tl-time { color: var(--muted); font-variant-numeric: tabular-nums; }
+    .tl-note { color: var(--muted); font-size: 0.78rem; }
+    tr[tabindex]:focus-visible { outline: 2px solid var(--accent-2); outline-offset: -2px; }
+    @media (max-width: 860px) { .fact { grid-template-columns: 1fr; gap: 2px; } }
+
     @media (max-width: 860px) {
       .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .bars { grid-template-columns: 1fr; }
@@ -321,32 +368,39 @@
         <span class="desc">Everything below requires an approver or release operator. The agent cannot promote to production on its own.</span>
       </div>
 
+      <div class="live-bar">
+        <span id="liveDot" class="live-dot"></span><span id="liveText">Connecting...</span>
+        <button id="liveToggle" class="ghost small" type="button">Pause</button>
+      </div>
+      <div id="inbox" class="inbox"></div>
+
       <table class="changes">
         <thead>
-          <tr><th>Change</th><th>Service</th><th>Issue</th><th>Mode</th><th>Conf.</th><th>Status</th><th>Stage</th></tr>
+          <tr><th>Change</th><th>Service</th><th>Issue</th><th>Mode</th><th>Conf.</th><th>Status</th><th>Needs</th><th>Stage</th></tr>
         </thead>
-        <tbody id="changesBody"><tr><td colspan="7">No changes loaded yet.</td></tr></tbody>
+        <tbody id="changesBody"><tr><td colspan="8">No changes loaded yet.</td></tr></tbody>
       </table>
-      <div class="btn-row">
-        <button id="refreshChangesBtn" class="ghost">Refresh Changes</button>
-      </div>
 
       <div id="selectedInfo" class="status" style="margin-top:14px;">Select a change above to review and act on it.</div>
       <div id="stepper"></div>
       <div id="changeDetail"></div>
 
-      <div class="controls" style="margin-top:12px;">
-        <textarea id="actionComment" placeholder="Optional comment used for prepare-pr / decision / promote"></textarea>
+      <div class="section-divider">
+        <div class="section-label">
+          <span class="tag" style="font-size:0.9rem;">Other actions</span>
+          <span class="desc">Approving and promoting happen in the review screens above, once a change is ready for them.</span>
+        </div>
+      </div>
+      <div class="controls">
+        <textarea id="actionComment" placeholder="Optional comment for prepare-pr / dev validation"></textarea>
       </div>
       <div class="btn-row">
         <button id="runAgentsBtn" class="secondary">Run Agents</button>
         <button id="preparePrBtn" class="secondary">Prepare Draft PR</button>
         <button id="executeDevBtn" class="secondary">Execute Dev Validation</button>
         <button id="refreshBuildBtn" class="secondary">Refresh Build Status</button>
-        <button id="approveBtn">Approve</button>
-        <button id="rejectBtn" class="bad-btn">Reject</button>
-        <button id="promoteBtn" class="warn-btn">Promote to Production</button>
       </div>
+      <div id="actionHint" class="status"></div>
 
       <pre id="patchPreview" class="patch" style="display:none;"></pre>
     </div>
@@ -604,45 +658,127 @@
       return "warn";
     }
 
-    async function refreshChangesList() {
-      try {
-        const changes = await api("/v1/changes", { role: "viewer" });
-        const rows = [...changes].reverse().slice(0, 25);
-        const body = el("changesBody");
-        if (!rows.length) {
-          body.innerHTML = `<tr><td colspan="7">No changes yet — create a mock incident above.</td></tr>`;
-          return;
-        }
-        body.innerHTML = rows.map((c) => {
-          const stg = stageFor(c);
-          const sel = c.change_id === selectedChangeId ? "selected" : "";
-          return `
-            <tr class="${sel}" data-id="${c.change_id}">
-              <td>${c.change_id}</td>
-              <td>${escapeHtml(c.service)}</td>
-              <td>${escapeHtml(c.issue_type)}</td>
-              <td>${modeBadge(c.triage_mode_used)}</td>
-              <td>${Number(c.confidence || 0).toFixed(2)}</td>
-              <td>${pillFor(c.status, statusKind(c))}</td>
-              <td>${STAGES[stg.index - 1]}</td>
-            </tr>
-          `;
-        }).join("");
-        body.querySelectorAll("tr[data-id]").forEach((tr) => {
-          tr.addEventListener("click", () => selectChange(tr.getAttribute("data-id")));
-        });
-      } catch (err) {
-        setStatus(`Failed to load changes: ${err.message}`);
+    // ---- live list of changes ----------------------------------------------------------
+    // [label in the table, colour, wording in the inbox]
+    const ATTENTION = {
+      needs_approval: ["Needs approval", "warn", "awaiting approval"],
+      needs_promotion: ["Needs promotion", "warn", "awaiting promotion"],
+      escalated: ["Handed to a person", "bad", "handed over by the agents"],
+      blocked: ["Blocked by policy", "bad", "blocked by policy"],
+      agents_working: ["Agents working", "info", "being worked on by the agents"],
+      promoting: ["Deploying", "info", "deploying to production"],
+    };
+    const INBOX_ORDER = ["needs_approval", "needs_promotion", "escalated", "blocked", "agents_working", "promoting"];
+
+    let overview = [];
+    let live = true;
+    let pollTimer = null;
+    let pollFailures = 0;
+    let overviewStamp = "";
+    let detailSeq = 0;
+    let detailLoaded = { id: "", version: -1 };
+
+    function setLive(ok, text) {
+      el("liveDot").className = `live-dot ${!live ? "paused" : ok ? "on" : "off"}`;
+      el("liveText").textContent = !live ? "Paused" : ok ? `Live · updated ${new Date().toLocaleTimeString()}` : `Offline, retrying · ${text || ""}`;
+    }
+
+    function renderInbox() {
+      const counts = {};
+      overview.forEach((r) => { if (r.attention) counts[r.attention] = (counts[r.attention] || 0) + 1; });
+      const items = INBOX_ORDER.filter((k) => counts[k]).map((k) =>
+        `<button class="inbox-item ${ATTENTION[k][1]}" data-attn="${k}"><strong>${counts[k]}</strong> ${ATTENTION[k][2]}</button>`);
+      el("inbox").innerHTML = items.length ? items.join("") : `<span class="status" style="margin:0;">Nothing needs a person right now.</span>`;
+    }
+
+    function renderChangesTable() {
+      const body = el("changesBody");
+      if (!overview.length) {
+        body.innerHTML = `<tr><td colspan="8">No changes yet — create a mock incident above.</td></tr>`;
+        return;
       }
+      body.innerHTML = overview.map((r) => {
+        const stg = stageFor(r);
+        const [label, kind] = ATTENTION[r.attention] || ["", ""];
+        return `
+          <tr class="${r.change_id === selectedChangeId ? "selected" : ""}" data-id="${escapeHtml(r.change_id)}" tabindex="0">
+            <td>${escapeHtml(r.change_id)}</td>
+            <td>${escapeHtml(r.service)}</td>
+            <td>${escapeHtml(r.issue_type)}</td>
+            <td>${modeBadge(r.triage_mode_used)}</td>
+            <td>${Number(r.confidence || 0).toFixed(2)}</td>
+            <td>${pillFor(r.status, statusKind(r))}</td>
+            <td>${label ? pillFor(label, kind) : ""}</td>
+            <td>${STAGES[stg.index - 1]}</td>
+          </tr>`;
+      }).join("");
+    }
+
+    async function pollOnce() {
+      try {
+        overview = await api("/v1/changes/overview?limit=25", { role: "viewer" });
+        pollFailures = 0;
+        renderChangesTable();
+        renderInbox();
+        setLive(true);
+        const stamp = overview.map((r) => `${r.change_id}:${r.version}`).join("|");
+        if (stamp !== overviewStamp) {
+          overviewStamp = stamp;
+          loadMetrics();
+        }
+        const selected = overview.find((r) => r.change_id === selectedChangeId);
+        if (selected && (detailLoaded.id !== selected.change_id || detailLoaded.version !== selected.version)) {
+          await loadChangeDetail(selectedChangeId);
+        }
+      } catch (err) {
+        pollFailures += 1;
+        setLive(false, err.message);
+      }
+    }
+
+    function schedulePoll() {
+      clearTimeout(pollTimer);
+      if (!live) return;
+      const busy = overview.some((r) => r.attention === "agents_working" || r.attention === "promoting");
+      const delay = pollFailures ? Math.min(30000, 3000 * 2 ** pollFailures) : (busy ? 1500 : 4000);
+      pollTimer = setTimeout(async () => {
+        if (!document.hidden) await pollOnce();
+        schedulePoll();
+      }, delay);
+    }
+
+    async function refreshChangesList() { await pollOnce(); }
+
+    function toggleLive() {
+      live = !live;
+      el("liveToggle").textContent = live ? "Pause" : "Resume";
+      setLive(pollFailures === 0);
+      if (live) { pollOnce(); schedulePoll(); } else { clearTimeout(pollTimer); }
     }
 
     async function selectChange(changeId) {
       selectedChangeId = changeId;
       selectedInfoEl.textContent = `Selected change: ${changeId}`;
-      await refreshChangesList();
+      detailLoaded = { id: "", version: -1 };
+      renderChangesTable();
       await loadChangeDetail(changeId);
     }
 
+    // ---- identity (for the separation-of-duties check on the promotion screen) ---------
+    let identityCache = { key: "", value: null };
+    async function loadIdentity() {
+      const key = `${keyFor("approver")}|${keyFor("release")}`;
+      if (identityCache.key === key && identityCache.value) return identityCache.value;
+      const [approver, release] = await Promise.all([
+        api("/v1/whoami", { role: "approver" }).catch(() => null),
+        api("/v1/whoami", { role: "release" }).catch(() => null),
+      ]);
+      identityCache = { key, value: { approver, release } };
+      return identityCache.value;
+    }
+    ["approverKey", "releaseKey"].forEach((id) => el(id).addEventListener("change", () => { identityCache = { key: "", value: null }; }));
+
+    // ---- the case file -----------------------------------------------------------------
     function codeFixHtml(c) {
       if (!c.code_change_status || c.code_change_status === "not_started") return "";
       const kind = c.code_change_status === "applied" ? "ok" : "bad";
@@ -656,33 +792,6 @@
         </div>
       `;
     }
-
-    async function auditTrailHtml(changeId) {
-      try {
-        const trail = await api(`/v1/changes/${encodeURIComponent(changeId)}/audit`, { role: "viewer" });
-        if (!trail.length) return "";
-        const rows = trail.map((e) => {
-          const when = new Date(e.occurred_at).toLocaleTimeString();
-          const move = e.from_state && e.from_state !== e.to_state ? ` (${escapeHtml(e.from_state)} → ${escapeHtml(e.to_state)})` : "";
-          return `<li>${escapeHtml(when)} · <strong>${escapeHtml(e.actor)}</strong> · ${escapeHtml(e.action)}${move}</li>`;
-        }).join("");
-        return `
-          <div style="margin-top:10px;">
-            <span class="k" style="font-size:0.85rem;">Audit trail:</span>
-            <ul class="policy-list" style="list-style:none;padding-left:0;">${rows}</ul>
-          </div>`;
-      } catch (err) {
-        return "";
-      }
-    }
-
-
-    // ---- agent run -------------------------------------------------------------------
-    const AGENT_STATUS = {
-      running: ["Agents working", "warn"],
-      ready_for_approval: ["Ready for a person to approve", "ok"],
-      escalated: ["Handed to a person", "bad"],
-    };
 
     function verdictKind(v) { return v === "passed" || v === "approve_for_human" ? "ok" : (v === "inconclusive" || v === "send_back" ? "warn" : "bad"); }
 
@@ -704,32 +813,269 @@
       return html + "</li>";
     }
 
-    async function agentRunHtml(changeId) {
-      let data;
-      try { data = await api(`/v1/changes/${encodeURIComponent(changeId)}/agent-run`, { role: "viewer" }); } catch { return ""; }
-      if (data.agent_run_status === "not_started") return "";
-      const run = data.agent_run || {};
-      const [label, kind] = AGENT_STATUS[data.agent_run_status] || [data.agent_run_status, "warn"];
-      const inv = run.investigation;
-      let html = `<div style="margin-top:12px;"><span class="k" style="font-size:0.85rem;">Agent run #${escapeHtml(run.run || 1)}:</span> ${pillFor(label, kind)}`;
+    function diffHtml(diff) {
+      if (!diff || !diff.text) return "";
+      const lines = diff.text.split("\n").map((line) => {
+        let cls = "";
+        if (/^(\+\+\+|---|diff |index )/.test(line)) cls = "meta";
+        else if (line.startsWith("@@")) cls = "hunk";
+        else if (line.startsWith("+")) cls = "add";
+        else if (line.startsWith("-")) cls = "del";
+        return `<span class="dl ${cls}">${escapeHtml(line)}</span>`;
+      }).join("");
+      return `<pre class="diff">${lines}</pre>` +
+        (diff.truncated ? `<p class="status">The diff is longer than what is stored for display; review the branch itself before approving.</p>` : "") +
+        `<p class="status" style="margin-top:4px;">Fingerprint of the verified diff (sha256): <code>${escapeHtml(String(diff.sha256).slice(0, 16))}…</code></p>`;
+    }
+
+    function factRow(label, html) { return `<div class="fact"><div class="k">${label}</div><div>${html}</div></div>`; }
+
+    function reviewFacts(review, c) {
+      const d = review.diagnosis;
+      const rows = [];
+      if (d) {
+        rows.push(factRow("Diagnosis", `<strong>${escapeHtml(d.issue_type)}</strong> · confidence ${Number(d.confidence).toFixed(2)} (${escapeHtml(d.mode)})<br>${escapeHtml(d.root_cause || "")}` +
+          (d.alternatives.length ? `<br><span class="k">Also considered: ${d.alternatives.map((a) => `${escapeHtml(a.issue_type)} ${Number(a.confidence).toFixed(2)}`).join(", ")}</span>` : "")));
+      }
+      if (review.fix) {
+        rows.push(factRow("Change", `${review.fix.files.map(escapeHtml).join(", ") || "no files"}<br><span class="k">branch ${escapeHtml(review.fix.branch)} · verified on attempt ${review.fix.attempts}${review.fix.summary ? " · " + escapeHtml(review.fix.summary) : ""}</span>`));
+      }
+      const v = review.verification;
+      if (v) {
+        const checks = v.checks.map((x) => `<span class="check ${verdictKind(x.status)}" title="${escapeHtml(x.detail)}">${escapeHtml(x.name)}: ${escapeHtml(x.status)}</span>`).join(" ");
+        const m = v.alert_metric || {};
+        const metric = m.before !== undefined ? `<br><span class="k">${escapeHtml((c.alert && c.alert.metric) || "alert metric")}: ${m.before} before → ${m.after} after the fix (threshold ${m.threshold})</span>` : "";
+        rows.push(factRow("Verification", `${pillFor(v.verdict, verdictKind(v.verdict))} ${checks}${metric}`));
+      }
+      const k = review.critic;
+      if (k) {
+        const concerns = k.concerns.map((x) => `<li>${escapeHtml(x.severity)}: ${escapeHtml(x.text)}</li>`).join("");
+        rows.push(factRow("Critic", `${pillFor(k.decision, verdictKind(k.decision))} risk <strong>${escapeHtml(k.risk)}</strong> · ${k.changed_lines} changed line(s)` +
+          (concerns ? `<ul class="policy-list">${concerns}</ul>` : "")));
+      }
+      rows.push(factRow("Policy gate", review.policy.passes
+        ? `<span class="policy-ok">Passes</span>`
+        : `<ul class="policy-list">${review.policy.reasons.map((r) => `<li>${escapeHtml(r)}</li>`).join("")}</ul>`));
+      return `<div class="facts">${rows.join("")}</div>`;
+    }
+
+    function actionOf(review, name) { return review.actions.find((a) => a.name === name) || { allowed: false, reason: "" }; }
+
+    function approvalPanel(review, c) {
+      if (review.attention !== "needs_approval") return "";
+      const approve = actionOf(review, "approve");
+      const reject = actionOf(review, "reject");
+      const diff = review.fix ? diffHtml(review.fix.diff) : "";
+      return `
+        <div class="screen">
+          <h3>Approval · review before you decide</h3>
+          ${reviewFacts(review, c)}
+          ${diff || `<p class="status">No agent-produced diff on this change; it was validated through the manual dev flow.</p>`}
+          <label class="confirm"><input type="checkbox" id="reviewedBox"> I have read the diff, the verification checks and the Critic's concerns.</label>
+          <textarea id="decisionComment" placeholder="Comment recorded with your decision (optional)"></textarea>
+          <div class="btn-row">
+            <button data-act="approve" id="approveBtn" ${approve.allowed ? "" : "disabled"} title="${escapeHtml(approve.reason)}">Approve</button>
+            <button data-act="reject" class="bad-btn" ${reject.allowed ? "" : "disabled"} title="${escapeHtml(reject.reason)}">Reject</button>
+          </div>
+          <p class="status" id="approveHint">Tick the box above to enable Approve. Approving does not deploy anything: a different person promotes it next.</p>
+        </div>`;
+    }
+
+    function promotionPanel(review, c, identity) {
+      if (review.attention !== "needs_promotion") return "";
+      const promote = actionOf(review, "promote");
+      const a = review.approval;
+      const me = identity && identity.release ? identity.release.actor : "";
+      const sameAsApprover = a.enforce_separation_of_duties && me && me === a.decided_by;
+      const when = a.decided_at ? new Date(a.decided_at).toLocaleString() : "";
+      const identityLine = !a.enforce_separation_of_duties
+        ? `<span class="k">Separation of duties is not enforced in this environment.</span>`
+        : sameAsApprover
+          ? `<span class="policy-list" style="padding:0;list-style:none;display:block;">The release key belongs to <strong>${escapeHtml(me)}</strong>, who also approved this change. Another release operator has to promote it.</span>`
+          : `<span class="policy-ok">The release key belongs to ${escapeHtml(me || "an unknown user")}, a different person from the approver (${escapeHtml(a.decided_by)}).</span>`;
+      const disabled = !promote.allowed || sameAsApprover;
+      return `
+        <div class="screen">
+          <h3>Promotion · release to production</h3>
+          <div class="facts">
+            ${factRow("Approved", `by <strong>${escapeHtml(a.decided_by || "")}</strong> ${escapeHtml(when)}${a.comment ? `<br><span class="k">“${escapeHtml(a.comment)}”</span>` : ""}`)}
+            ${review.fix ? factRow("Releasing", `${review.fix.files.map(escapeHtml).join(", ")}<br><span class="k">branch ${escapeHtml(review.fix.branch)}</span>`) : ""}
+            ${review.critic ? factRow("Critic", `risk <strong>${escapeHtml(review.critic.risk)}</strong>`) : ""}
+            ${factRow("Who you are", identityLine)}
+          </div>
+          <textarea id="decisionComment" placeholder="Comment recorded with the promotion (optional)"></textarea>
+          <div class="btn-row">
+            <button data-act="promote" class="warn-btn" ${disabled ? "disabled" : ""} title="${escapeHtml(promote.reason)}">Promote to Production</button>
+          </div>
+          ${promote.note ? `<p class="status">${escapeHtml(promote.note)}</p>` : ""}
+        </div>`;
+    }
+
+    function runSummaryHtml(review, c) {
+      const run = review.agent_run;
+      if (run.status === "not_started") return "";
+      const [label, kind] = AGENT_STATUS[run.status] || [run.status, "warn"];
+      let html = `<div class="section-block"><span class="k" style="font-size:0.85rem;">Agent run #${escapeHtml(run.run || 1)}:</span> ${pillFor(label, kind)}`;
       if (run.escalation_reason) html += `<p class="status" style="white-space:pre-wrap;margin-top:6px;">${escapeHtml(run.escalation_reason)}</p>`;
       if (run.summary) html += `<p class="status" style="margin-top:6px;">${escapeHtml(run.summary)}</p>`;
-      if (inv) {
-        const top = (inv.hypotheses || [])[0];
-        if (top) {
-          html += `<p style="margin:8px 0 2px;font-size:0.85rem;"><strong>Diagnosis:</strong> ${escapeHtml(top.issue_type)} ` +
-            `(confidence ${Number(top.confidence).toFixed(2)}, ${escapeHtml(inv.mode_used)}) — ${escapeHtml(top.root_cause)}</p>`;
-        }
-        const others = (inv.hypotheses || []).slice(1).map((h) => `${escapeHtml(h.issue_type)} ${Number(h.confidence).toFixed(2)}`).join(", ");
-        if (others) html += `<p class="status" style="margin:0;">Also considered: ${others}</p>`;
-        const evidence = (inv.evidence || []).map((e) => `<li>${escapeHtml(e.id)} · ${escapeHtml(e.kind)} · ${escapeHtml(e.summary)}</li>`).join("");
-        html += `<details style="margin-top:6px;"><summary class="k">Evidence (${(inv.evidence || []).length}) — logs and deploy notes are untrusted text</summary>` +
-          `<ul class="policy-list" style="color:inherit;list-style:none;padding-left:0;">${evidence}</ul></details>`;
-      }
-      const attempts = (run.attempts || []).map(attemptHtml).join("");
+      const attempts = ((c.agent_run || {}).attempts || []).map(attemptHtml).join("");
       if (attempts) html += `<ul class="policy-list" style="color:inherit;list-style:none;padding-left:0;margin-top:8px;">${attempts}</ul>`;
       return html + "</div>";
     }
+
+    function evidenceHtml(review) {
+      if (!review.evidence.length) return "";
+      const items = review.evidence.map((e) =>
+        `<li class="${e.supports_diagnosis ? "supports" : ""}">${e.supports_diagnosis ? "✓ " : ""}<span class="k">${escapeHtml(e.id)} · ${escapeHtml(e.kind)}</span> ${escapeHtml(e.summary)}</li>`).join("");
+      return `<details data-key="evidence" class="section-block"><summary class="k">Evidence (${review.evidence.length}) — ✓ marks what supports the diagnosis; logs and deploy notes are untrusted text</summary>` +
+        `<ul class="evidence">${items}</ul></details>`;
+    }
+
+    const ACTOR_ICON = { agent: "🤖", human: "👤", system: "⚙️", tools: "🔧" };
+
+    function timelineHtml(review) {
+      if (!review.timeline.length) return "";
+      const rows = review.timeline.map((e) => {
+        const icon = e.kind === "tools" ? ACTOR_ICON.tools : (ACTOR_ICON[e.actor_kind] || "•");
+        const move = e.from_state && e.to_state && e.from_state !== e.to_state ? ` <span class="k">${escapeHtml(e.from_state)} → ${escapeHtml(e.to_state)}</span>` : "";
+        const note = e.note ? `<div class="tl-note">${escapeHtml(e.note)}</div>` : "";
+        const problem = e.problem ? ` ${pillFor(e.problem, "warn")}` : "";
+        return `<li class="tl ${escapeHtml(e.actor_kind)}"><span class="tl-icon">${icon}</span><div>` +
+          `<span class="tl-time">${escapeHtml(new Date(e.at).toLocaleTimeString())}</span> <strong>${escapeHtml(e.actor_name)}</strong> ${escapeHtml(e.label)}${move}${problem}${note}</div></li>`;
+      }).join("");
+      return `<details data-key="timeline" class="section-block" open><summary class="k">Timeline (${review.timeline.length})</summary><ol class="timeline">${rows}</ol></details>`;
+    }
+
+    function bannerHtml(review, c) {
+      let kind = (ATTENTION[review.attention] || [])[1] || "";
+      if (c.deployment_state === "promoted_to_prod") kind = "ok";
+      if (c.status === "rejected" || c.deployment_state === "prod_promotion_failed") kind = "bad";
+      return `<div class="banner ${kind}"><strong>${escapeHtml(review.headline)}</strong>` +
+        `<span class="k"> · ${escapeHtml(c.service)} (${escapeHtml(c.environment)}) · ${escapeHtml(c.change_id)}</span></div>`;
+    }
+
+    function applyActionState(review, c) {
+      const run = actionOf(review, "run_agents");
+      const refresh = actionOf(review, "refresh_status");
+      const working = review.agent_run.status === "running";
+      [["runAgentsBtn", run.allowed, run.reason], ["refreshBuildBtn", refresh.allowed, refresh.reason],
+       ["preparePrBtn", !working, "The agents are still working on this change"], ["executeDevBtn", !working, "The agents are still working on this change"]]
+        .forEach(([id, ok, why]) => { el(id).disabled = !ok; el(id).title = ok ? "" : why; });
+      el("actionHint").textContent = run.allowed ? "" : (run.reason ? `Run Agents is closed: ${run.reason}` : "");
+    }
+
+    function closedDetailKeys() {
+      return new Set([...document.querySelectorAll("#changeDetail details[data-key]")].filter((d) => !d.open).map((d) => d.dataset.key));
+    }
+
+    async function loadChangeDetail(changeId) {
+      const seq = ++detailSeq;
+      try {
+        const [c, review, identity] = await Promise.all([
+          api(`/v1/changes/${encodeURIComponent(changeId)}`, { role: "viewer" }),
+          api(`/v1/changes/${encodeURIComponent(changeId)}/review`, { role: "viewer" }),
+          loadIdentity(),
+        ]);
+        if (seq !== detailSeq || changeId !== selectedChangeId) return; // a newer load or selection won
+
+        // Keep what the person was in the middle of, and which sections they had open or shut.
+        const sameChange = detailLoaded.id === changeId;
+        const keep = sameChange ? { comment: (el("decisionComment") || {}).value || "", reviewed: !!(el("reviewedBox") || {}).checked } : { comment: "", reviewed: false };
+        const closed = closedDetailKeys();
+
+        renderStepper(c);
+        const correlatedHtml = c.alert_count > 1
+          ? `<div><span class="k">Correlated alerts:</span> ${c.alert_count} (${c.related_alerts.map(escapeHtml).join(", ")})</div>`
+          : "";
+        const legacy = `
+          <details data-key="legacy" class="section-block"><summary class="k">Ticket, build and PR details</summary>
+            ${reasoningBox(c.triage_mode_used, c.confidence, "", c.triage_hypothesis_steps)}
+            <div class="detail-grid">
+              <div><span class="k">Jira:</span> ${escapeHtml(c.jira_key || "pending (ticket not created)")}</div>
+              <div><span class="k">Jenkins status:</span> ${escapeHtml(c.jenkins_status)}</div>
+              <div><span class="k">PR status:</span> ${escapeHtml(c.pr_status)} ${c.pr_url ? `(<a href="${escapeHtml(c.pr_url)}" target="_blank" rel="noopener">link</a>)` : ""}</div>
+              <div><span class="k">Test evidence:</span> ${escapeHtml(c.test_evidence_status)} ${c.test_pass_rate != null ? `(${(c.test_pass_rate * 100).toFixed(0)}%)` : ""}</div>
+              <div><span class="k">Dev execution:</span> ${escapeHtml(c.dev_execution_status)} ${c.dev_apm_improvement_pct != null ? `(APM +${c.dev_apm_improvement_pct}%)` : ""}</div>
+              <div><span class="k">Decision:</span> ${escapeHtml(c.status)} ${c.decided_by ? `by ${escapeHtml(c.decided_by)}` : ""}</div>
+              <div><span class="k">Deployment state:</span> ${escapeHtml(c.deployment_state)}</div>
+              ${correlatedHtml}
+            </div>
+            ${codeFixHtml(c)}
+          </details>`;
+
+        el("changeDetail").innerHTML = [
+          bannerHtml(review, c),
+          approvalPanel(review, c),
+          promotionPanel(review, c, identity),
+          runSummaryHtml(review, c),
+          evidenceHtml(review),
+          timelineHtml(review),
+          legacy,
+        ].join("");
+
+        document.querySelectorAll("#changeDetail details[data-key]").forEach((d) => { if (closed.has(d.dataset.key)) d.open = false; });
+        if (el("decisionComment")) el("decisionComment").value = keep.comment;
+        if (el("reviewedBox")) { el("reviewedBox").checked = keep.reviewed; syncApproveButton(review); }
+        applyActionState(review, c);
+
+        const patchEl = el("patchPreview");
+        if (c.patch_preview) {
+          patchEl.style.display = "block";
+          patchEl.textContent = c.patch_preview;
+        } else {
+          patchEl.style.display = "none";
+        }
+        detailLoaded = { id: changeId, version: Math.min(c.version, review.version) };
+        lastReview = review;
+      } catch (err) {
+        setStatus(`Failed to load change detail: ${err.message}`);
+      }
+    }
+
+    let lastReview = null;
+    function syncApproveButton(review) {
+      const btn = el("approveBtn");
+      if (!btn) return;
+      const open = actionOf(review, "approve").allowed;
+      btn.disabled = !(open && el("reviewedBox").checked);
+      el("approveHint").textContent = !open ? actionOf(review, "approve").reason
+        : el("reviewedBox").checked ? "Approving does not deploy anything: a different person promotes it next."
+        : "Tick the box above to enable Approve. Approving does not deploy anything: a different person promotes it next.";
+    }
+
+    el("changeDetail").addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-act]");
+      if (!button || button.disabled) return;
+      const act = button.dataset.act;
+      if (act === "approve") decide("approve");
+      else if (act === "reject") decide("reject");
+      else if (act === "promote") promote();
+    });
+    el("changeDetail").addEventListener("change", (event) => {
+      if (event.target.id === "reviewedBox" && lastReview) syncApproveButton(lastReview);
+    });
+    el("changesBody").addEventListener("click", (event) => {
+      const row = event.target.closest("tr[data-id]");
+      if (row) selectChange(row.dataset.id);
+    });
+    el("changesBody").addEventListener("keydown", (event) => {
+      const row = event.target.closest("tr[data-id]");
+      if (row && event.key === "Enter") selectChange(row.dataset.id);
+    });
+    el("inbox").addEventListener("click", (event) => {
+      const item = event.target.closest("[data-attn]");
+      const row = item && overview.find((r) => r.attention === item.dataset.attn);
+      if (row) selectChange(row.change_id);
+    });
+    el("liveToggle").addEventListener("click", toggleLive);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden && live) { pollOnce(); schedulePoll(); } });
+
+    // ---- agent run ---------------------------------------------------------------------
+    const AGENT_STATUS = {
+      running: ["Agents working", "warn"],
+      ready_for_approval: ["Ready for a person to approve", "ok"],
+      escalated: ["Handed to a person", "bad"],
+    };
 
     async function loadScenarios() {
       try {
@@ -757,78 +1103,17 @@
       }
     }
 
-    let agentPoll = null;
-    async function watchAgentRun(changeId, attemptsLeft = 120) {
-      clearTimeout(agentPoll);
-      try {
-        await refreshChangesList();
-        if (selectedChangeId === changeId) await loadChangeDetail(changeId);
-        const data = await api(`/v1/changes/${encodeURIComponent(changeId)}/agent-run`, { role: "viewer" });
-        if (data.agent_run_status === "running" && attemptsLeft > 0) {
-          agentPoll = setTimeout(() => watchAgentRun(changeId, attemptsLeft - 1), 1500);
-        } else {
-          setStatus(`Agent run finished: ${data.agent_run_status}. deployment_state=${data.deployment_state}`);
-          await loadMetrics();
-        }
-      } catch (err) {
-        setStatus(`Could not read the agent run: ${err.message}`);
-      }
-    }
-
     async function runAgents() {
       if (!selectedChangeId) { setStatus("Select a change first."); return; }
       const changeId = selectedChangeId;
       try {
         setStatus("Starting the agents (Investigator, Fixer, Verifier, Critic)...");
         await api(`/v1/changes/${encodeURIComponent(changeId)}/investigate`, { method: "POST", role: "approver" });
-        watchAgentRun(changeId);
+        setStatus("The agents are working. This page updates as they go.");
+        await pollOnce();
+        schedulePoll();
       } catch (err) {
         setStatus(`Run agents failed: ${err.message}`);
-      }
-    }
-
-    async function loadChangeDetail(changeId) {
-      try {
-        const c = await api(`/v1/changes/${encodeURIComponent(changeId)}`, { role: "viewer" });
-        renderStepper(c);
-        const auditHtml = await auditTrailHtml(changeId);
-        const agentHtml = await agentRunHtml(changeId);
-        const correlatedHtml = c.alert_count > 1
-          ? `<div><span class="k">Correlated alerts:</span> ${c.alert_count} (${c.related_alerts.map(escapeHtml).join(", ")})</div>`
-          : "";
-
-        const policyHtml = (c.policy_reasons && c.policy_reasons.length)
-          ? `<ul class="policy-list">${c.policy_reasons.map((r) => `<li>${escapeHtml(r)}</li>`).join("")}</ul>`
-          : `<div class="policy-ok">No policy blockers.</div>`;
-
-        el("changeDetail").innerHTML = `
-          ${reasoningBox(c.triage_mode_used, c.confidence, "", c.triage_hypothesis_steps)}
-          <div class="detail-grid">
-            <div><span class="k">Service:</span> ${escapeHtml(c.service)} (${escapeHtml(c.environment)})</div>
-            <div><span class="k">Jira:</span> ${escapeHtml(c.jira_key || "pending (ticket not created)")}</div>
-            <div><span class="k">Jenkins status:</span> ${escapeHtml(c.jenkins_status)}</div>
-            <div><span class="k">PR status:</span> ${escapeHtml(c.pr_status)} ${c.pr_url ? `(<a href="${c.pr_url}" target="_blank" rel="noopener">link</a>)` : ""}</div>
-            <div><span class="k">Test evidence:</span> ${escapeHtml(c.test_evidence_status)} ${c.test_pass_rate != null ? `(${(c.test_pass_rate*100).toFixed(0)}%)` : ""}</div>
-            <div><span class="k">Dev execution:</span> ${escapeHtml(c.dev_execution_status)} ${c.dev_apm_improvement_pct != null ? `(APM +${c.dev_apm_improvement_pct}%)` : ""}</div>
-            <div><span class="k">Decision:</span> ${escapeHtml(c.status)} ${c.decided_by ? `by ${escapeHtml(c.decided_by)}` : ""}</div>
-            <div><span class="k">Deployment state:</span> ${escapeHtml(c.deployment_state)}</div>
-            ${correlatedHtml}
-          </div>
-          <div style="margin-top:8px;"><span class="k" style="font-size:0.85rem;">Policy check:</span> ${policyHtml}</div>
-          ${codeFixHtml(c)}
-          ${agentHtml}
-          ${auditHtml}
-        `;
-
-        const patchEl = el("patchPreview");
-        if (c.patch_preview) {
-          patchEl.style.display = "block";
-          patchEl.textContent = c.patch_preview;
-        } else {
-          patchEl.style.display = "none";
-        }
-      } catch (err) {
-        setStatus(`Failed to load change detail: ${err.message}`);
       }
     }
 
@@ -879,7 +1164,7 @@
     async function decide(decision) {
       await runChangeAction(async () => {
         setStatus(`Recording ${decision} decision...`);
-        const comment = el("actionComment").value.trim();
+        const comment = (el("decisionComment") || {}).value?.trim() || "";
         const body = await api(`/v1/changes/${encodeURIComponent(selectedChangeId)}/decision`, {
           method: "POST", role: "approver", body: { decision, comment },
         });
@@ -890,7 +1175,7 @@
     async function promote() {
       await runChangeAction(async () => {
         setStatus("Triggering production promotion...");
-        const comment = el("actionComment").value.trim();
+        const comment = (el("decisionComment") || {}).value?.trim() || "";
         const body = await api(`/v1/changes/${encodeURIComponent(selectedChangeId)}/promote`, {
           method: "POST", role: "release", body: { comment },
         });
@@ -955,14 +1240,10 @@
 
     el("mockBtn").addEventListener("click", createMockIncident);
     el("compareBtn").addEventListener("click", compareTriageModes);
-    el("refreshChangesBtn").addEventListener("click", refreshChangesList);
     el("refreshBtn").addEventListener("click", loadMetrics);
     el("preparePrBtn").addEventListener("click", preparePr);
     el("executeDevBtn").addEventListener("click", executeDev);
     el("refreshBuildBtn").addEventListener("click", refreshBuildStatus);
-    el("approveBtn").addEventListener("click", () => decide("approve"));
-    el("rejectBtn").addEventListener("click", () => decide("reject"));
-    el("promoteBtn").addEventListener("click", promote);
     el("runAgentsBtn").addEventListener("click", runAgents);
     el("scenarioBtn").addEventListener("click", createScenarioIncident);
     el("queueAlertBtn").addEventListener("click", () => queueSchedulerAlert(false));
@@ -972,8 +1253,7 @@
 
     loadKeys();
     loadScenarios();
-    refreshChangesList();
-    loadMetrics();
+    pollOnce().then(schedulePoll);
     refreshSchedulerStatus();
   </script>
 </body>

@@ -48,3 +48,30 @@ def _hermetic_environment(monkeypatch, tmp_path):
         "ENFORCE_SEPARATION_OF_DUTIES",
     ):
         monkeypatch.delenv(key, raising=False)
+
+
+@pytest.fixture
+def make_app(monkeypatch):
+    """Build the real app with agent keys set, and return (module, client). Worktrees are refused unless a test supplies a provider."""
+
+    def _make(**env):
+        import importlib
+
+        from agent_harness import ExplodingProvider
+        from fastapi.testclient import TestClient
+
+        monkeypatch.setenv("VIEWER_API_KEY", "viewer-key")
+        monkeypatch.setenv("APPROVER_API_KEY", "approver-key")
+        monkeypatch.setenv("RELEASE_OPERATOR_API_KEY", "release-key")
+        monkeypatch.setenv("VERIFIER_POLL_INTERVAL_SECONDS", "0.01")
+        monkeypatch.setenv("MOCK_JENKINS_POLLS", "0")
+        monkeypatch.setenv("CODE_CHANGE_ALLOWED_PATHS", "faulty_project/,config/,src/")
+        for key, value in env.items():
+            monkeypatch.setenv(key, str(value))
+        import app.main as main_module
+
+        main_module = importlib.reload(main_module)
+        main_module.agent_runtime.sandbox_provider = ExplodingProvider()
+        return main_module, TestClient(main_module.app)
+
+    return _make
