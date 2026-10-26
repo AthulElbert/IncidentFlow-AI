@@ -75,6 +75,18 @@ class FixProposal(BaseModel):
     rationale: str = ""
 
 
+class FixAttempt(BaseModel):
+    """The Fixer's result: a proposal, or an honest statement that it made none."""
+
+    status: Literal["proposed", "no_fix", "failed"]
+    proposal: FixProposal | None = None
+    summary: str = ""
+    reason: str = ""  # why there is no proposal
+    steps: int = 0
+    tool_calls_used: int = 0
+    warnings: list[str] = Field(default_factory=list)
+
+
 class Check(BaseModel):
     name: str
     status: Literal["passed", "failed", "inconclusive", "skipped"]
@@ -97,6 +109,28 @@ class VerificationReport(BaseModel):
 
     def check(self, name: str) -> Check | None:
         return next((item for item in self.checks if item.name == name), None)
+
+
+class Concern(BaseModel):
+    severity: Literal["info", "minor", "major", "blocking"]
+    code: str
+    text: str
+    source: Literal["rules", "llm"] = "rules"
+
+
+class Review(BaseModel):
+    """The Critic's verdict on a verified fix. `approve_for_human` still needs a person's approval."""
+
+    incident_id: str
+    decision: Literal["approve_for_human", "send_back", "block"]
+    risk: Literal["low", "medium", "high"]
+    concerns: list[Concern] = Field(default_factory=list)
+    changed_files: list[str] = Field(default_factory=list)
+    changed_lines: int = 0
+    feedback_for_fixer: str = ""
+    mode_used: Literal["rules", "llm"] = "rules"
+    warnings: list[str] = Field(default_factory=list)
+    tool_calls_used: int = 0
 
 
 class InvestigationReport(BaseModel):

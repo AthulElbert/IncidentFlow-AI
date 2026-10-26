@@ -312,6 +312,14 @@ python scripts\replay_verifications.py
 
 This replays 13 good and bad fixes (a fix that does nothing, a partial fix, one that breaks another metric, a CI file edited behind the sandbox, a stray `.env`, ...) against a simulated dev environment. It is a regression check on the Verifier's logic, not proof about real fixes, and it is not yet wired into the live incident flow.
 
+## Fixer and Critic
+
+The Fixer (`src/app/agents/fixer.py`) is a model-driven tool loop that edits files in an isolated git worktree: it can list, read, grep and edit within the sandbox guardrails (allowed paths, size cap, no secrets, no CI or deploy files), but it cannot run tests, deploy, or decide that its change works. With `FIXER_MODE=off` (the default) it proposes nothing. The files it claims to have changed are read back from the worktree, never taken from the model.
+
+The Critic (`src/app/agents/critic.py`) reviews a fix that has already passed verification. Rules check that verification really passed, that the diagnosis was confident, that the changed files are the ones the evidence implicates (scope creep is sent back), and how risky the change is (touching payment, auth or schema paths, many files, many lines). `CRITIC_MODE=llm` lets a model add concerns, but never approve or clear a failed check. `approve_for_human` is not an approval: a person still decides.
+
+Neither is wired into the live incident flow yet.
+
 ## Safety and Governance
 
 - Assistive autonomy only: no automatic approval or production promotion

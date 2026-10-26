@@ -144,6 +144,11 @@ class Settings:
     verifier_poll_interval_seconds: float = 5.0
     verifier_soak_minutes: float = 10.0
     verifier_min_improvement: float = 0.5
+    fixer_mode: str = "off"
+    fixer_model: str = ""
+    fixer_max_steps: int = 12
+    critic_mode: str = "rules"
+    critic_model: str = ""
 
 
 _TOOL_MODES = {
@@ -153,6 +158,8 @@ _TOOL_MODES = {
     "DEPLOY_TARGET_MODE": ("deploy_target_mode", {"mock", "jenkins"}),
     "INVESTIGATOR_MODE": ("investigator_mode", {"heuristic", "llm"}),
     "DEV_METRICS_MODE": ("dev_metrics_mode", {"mock", "prometheus"}),
+    "FIXER_MODE": ("fixer_mode", {"off", "llm"}),
+    "CRITIC_MODE": ("critic_mode", {"rules", "llm"}),
     "MOCK_DEV_EFFECT": ("mock_dev_effect", {"resolves", "no_effect", "partial", "regresses_other", "deploy_fails"}),
 }
 
@@ -184,6 +191,11 @@ def validate_settings(settings: "Settings") -> None:
         errors.append("INVESTIGATION_MIN_CONFIDENCE must be in (0, 1]")
     if not 0.0 <= settings.investigation_min_margin < 1.0:
         errors.append("INVESTIGATION_MIN_MARGIN must be in [0, 1)")
+    for env_name, active in (("FIXER_MODE", settings.fixer_mode == "llm"), ("CRITIC_MODE", settings.critic_mode == "llm")):
+        if active and not settings.llm_api_key:
+            errors.append(f"{env_name}=llm requires LLM_API_KEY")
+    if not 1 <= settings.fixer_max_steps <= 50:
+        errors.append("FIXER_MAX_STEPS must be between 1 and 50")
     if settings.dev_metrics_mode == "prometheus" and not settings.dev_metrics_base_url:
         errors.append("DEV_METRICS_MODE=prometheus requires DEV_METRICS_BASE_URL")
     if not 0.0 < settings.verifier_min_improvement <= 1.0:
@@ -324,4 +336,9 @@ def load_settings(base_dir: str | None = None) -> Settings:
         verifier_poll_interval_seconds=_as_float(os.getenv("VERIFIER_POLL_INTERVAL_SECONDS"), default=5.0),
         verifier_soak_minutes=_as_float(os.getenv("VERIFIER_SOAK_MINUTES"), default=10.0),
         verifier_min_improvement=_as_float(os.getenv("VERIFIER_MIN_IMPROVEMENT"), default=0.5),
+        fixer_mode=os.getenv("FIXER_MODE", "off").strip().lower(),
+        fixer_model=os.getenv("FIXER_MODEL", "").strip(),
+        fixer_max_steps=_as_int(os.getenv("FIXER_MAX_STEPS"), default=12),
+        critic_mode=os.getenv("CRITIC_MODE", "rules").strip().lower(),
+        critic_model=os.getenv("CRITIC_MODEL", "").strip(),
     )

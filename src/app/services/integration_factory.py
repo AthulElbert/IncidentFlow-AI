@@ -121,7 +121,11 @@ def build_llm_client(settings: Settings):
     otherwise "heuristic" even when the client exists for code-fix.
     """
     needs_llm = (
-        settings.triage_mode == "llm" or settings.code_fix_mode == "llm" or settings.investigator_mode == "llm"
+        settings.triage_mode == "llm"
+        or settings.code_fix_mode == "llm"
+        or settings.investigator_mode == "llm"
+        or settings.fixer_mode == "llm"
+        or settings.critic_mode == "llm"
     )
     if not needs_llm:
         return None, "heuristic"
@@ -141,23 +145,37 @@ def build_llm_client(settings: Settings):
     return client, ("llm" if settings.triage_mode == "llm" else "heuristic")
 
 
-def build_investigator_llm(settings: Settings, shared_client):
-    """The Investigator may use its own model (INVESTIGATOR_MODEL); otherwise it shares the main client."""
-    if settings.investigator_mode != "llm":
+def build_agent_llm(settings: Settings, label: str, enabled: bool, model: str, shared_client):
+    """An agent may use its own model (its *_MODEL setting); otherwise it shares the main client."""
+    if not enabled:
         return None
-    if not settings.investigator_model or settings.investigator_model == settings.llm_model:
+    if not model or model == settings.llm_model:
         return shared_client
     try:
         return OpenAICompatibleLLMClient(
             base_url=settings.llm_base_url,
             api_key=settings.llm_api_key,
-            model=settings.investigator_model,
+            model=model,
             timeout_seconds=settings.llm_timeout_seconds,
             verify_ssl=settings.llm_verify_ssl,
         )
     except Exception as exc:
-        raise_unless_mock_fallback(settings, "Investigator LLM", exc)
+        raise_unless_mock_fallback(settings, f"{label} LLM", exc)
         return None
+
+
+def build_investigator_llm(settings: Settings, shared_client):
+    return build_agent_llm(
+        settings, "Investigator", settings.investigator_mode == "llm", settings.investigator_model, shared_client
+    )
+
+
+def build_fixer_llm(settings: Settings, shared_client):
+    return build_agent_llm(settings, "Fixer", settings.fixer_mode == "llm", settings.fixer_model, shared_client)
+
+
+def build_critic_llm(settings: Settings, shared_client):
+    return build_agent_llm(settings, "Critic", settings.critic_mode == "llm", settings.critic_model, shared_client)
 
 
 def build_pr_client(settings: Settings):

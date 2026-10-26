@@ -108,7 +108,11 @@ class FileSandbox:
         test_command: "str | list[str]" = "python -m pytest -q tests",
         test_timeout_seconds: int = 120,
         extra_env: dict[str, str] | None = None,
+        disposable: bool = False,
     ) -> None:
+        # `disposable` marks a checkout that exists only for this agent run (a worktree the provider
+        # created), which is the only kind reset() may wipe.
+        self.disposable = disposable
         self.root = Path(root).resolve()
         if not self.root.is_dir():
             raise ValueError(f"sandbox root does not exist: {root}")
@@ -237,6 +241,30 @@ class FileSandbox:
         from_git = self._git_diff()
         return from_git if from_git is not None else self._snapshot_diff()
 
+    def reset(self) -> None:
+        """Throw away every change so the next attempt starts clean.
+
+        For the orchestrator, not for agents (it is in no agent's permissions). Refused unless the
+        sandbox is a disposable checkout: `git reset --hard` on someone's real working copy would
+        destroy their uncommitted work.
+        """
+        if not self.disposable:
+            raise ToolError("reset is only allowed on a disposable worktree")
+        if (self.root / ".git").exists():
+            for args in (("reset", "-q", "--hard", "HEAD"), ("clean", "-fdq")):
+                result = self._git(*args)
+                if result is None or result.returncode != 0:
+                    detail = (result.stderr if result else "git unavailable").strip()[:200]
+                    raise ToolError(f"could not reset the worktree: {detail}")
+        else:
+            for rel, original in self._originals.items():
+                target = self.root / rel
+                if original is None:
+                    target.unlink(missing_ok=True)
+                else:
+                    target.write_text(original, encoding="utf-8")
+        self._originals.clear()
+
     def _git(self, *args: str) -> subprocess.CompletedProcess | None:
         try:
             return subprocess.run(
@@ -362,4 +390,5 @@ class GitWorktreeProvider:
             max_edit_lines=self.max_edit_lines,
             test_command=self.test_command,
             test_timeout_seconds=self.test_timeout_seconds,
+            disposable=True,
         )

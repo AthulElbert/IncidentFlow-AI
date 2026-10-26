@@ -36,6 +36,8 @@ from app.services.dev_fix_executor import DevFixExecutor
 from app.services.integration_factory import (
     build_apm_alert_source,
     build_apm_client,
+    build_critic_llm,
+    build_fixer_llm,
     build_investigator_llm,
     build_jenkins_client,
     build_jira_client,
@@ -49,6 +51,8 @@ from app.services.scheduler import AlertDedupStore, IncidentScheduler
 from app.services.triage_agent import TriageAgent
 from app.storage import atomic_write_text
 from app.tools.factory import build_toolkit
+from app.agents.critic import Critic
+from app.agents.fixer import Fixer
 from app.agents.investigator import Investigator
 from app.agents.verifier import Verifier
 
@@ -171,6 +175,18 @@ verifier = Verifier(
     min_improvement=settings.verifier_min_improvement,
 )
 
+_editable_paths = [part.strip() for part in settings.code_change_allowed_paths.split(",") if part.strip()]
+fixer = Fixer(
+    llm=build_fixer_llm(settings, llm_client),
+    max_steps=settings.fixer_max_steps,
+    editable_paths=_editable_paths,
+    max_changed_lines=settings.code_change_max_lines,
+)
+critic = Critic(
+    llm=build_critic_llm(settings, llm_client),
+    min_improvement=settings.verifier_min_improvement,
+)
+
 scheduler_dedup_path = str(base_dir / settings.scheduler_dedup_file)
 alert_dedup_store = AlertDedupStore(file_path=scheduler_dedup_path)
 scheduler = IncidentScheduler(
@@ -220,6 +236,8 @@ logger.info(
         "code_fix_mode": settings.code_fix_mode,
         "tool_modes": tool_modes,
         "investigator_mode": settings.investigator_mode,
+        "fixer_mode": settings.fixer_mode,
+        "critic_mode": settings.critic_mode,
         "dev_environment": tool_modes.get("deploy_target"),
         "log_level": settings.log_level,
         "storage_backend": settings.storage_backend,
