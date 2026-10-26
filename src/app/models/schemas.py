@@ -159,6 +159,8 @@ class ChangeRecord(BaseModel):
     agent_run_status: Literal["not_started", "running", "ready_for_approval", "escalated"] = "not_started"
     # Compact, durable record of the latest agent run: reports, attempts, escalation reason.
     agent_run: dict[str, Any] = Field(default_factory=dict)
+    # What the agents WOULD have done, from a shadow-mode run. It never changes the change's state or policy result.
+    shadow: dict[str, Any] = Field(default_factory=dict)
     decided_at: datetime | None = None
     decided_by: str | None = None
     decision_comment: str | None = None

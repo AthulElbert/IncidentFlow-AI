@@ -6,7 +6,7 @@ change: a templated "mitigation" file would only give the Verifier something mea
 """
 import json
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from app.adapters.llm_client import LLMClient
 from app.agents.evidence import clean_text
@@ -50,6 +50,7 @@ class Fixer:
         branch: str,
         feedback: str = "",
         attempt: int = 1,
+        llm_gate: Callable[[], None] | None = None,
     ) -> FixAttempt:
         if self.llm is None:
             return FixAttempt(status="no_fix", reason="no model is configured for the Fixer, so it cannot propose a change")
@@ -67,6 +68,8 @@ class Fixer:
         try:
             # max_steps tool uses, then one more reply once the model has been told it must finish.
             while steps <= self.max_steps + 1:
+                if llm_gate is not None:
+                    llm_gate()  # raises when the run has used its model calls
                 reply = self.llm.complete_json(messages, error_label="fixer")
                 action = reply.get("action")
                 if action == "final":

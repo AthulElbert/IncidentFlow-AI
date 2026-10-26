@@ -157,6 +157,7 @@ Open:
 - `GET /v1/changes/{change_id}`
 - `GET /v1/changes/overview` (one small row per change, newest first, with what each is waiting for; cheap to poll)
 - `GET /v1/changes/{change_id}/review` (the case file a person decides from: diagnosis, evidence, verified diff, checks, Critic, policy result, which actions are open and why not, and a timeline)
+- `GET /v1/shadow/report` and `POST /v1/changes/{change_id}/shadow-run` (shadow mode)
 - `GET /v1/changes/{change_id}/postmortem` (postmortem draft, markdown)
 - `GET /v1/whoami` (the actor and role a key belongs to)
 - `GET /v1/changes/{change_id}/audit` (who did what to this change, oldest first)
@@ -193,6 +194,18 @@ Notes:
 - If `PR_LOCAL_BRANCH_MODE=git`, service attempts `git branch <generated-branch>`
 - If `CODE_CHANGE_MODE=sandbox_git`, service creates/uses `.agent_worktrees/<branch>` and applies real file edits with path/size guardrails.
 - In scheduler mode (`APM_POLL_MODE=poll`), the app continuously polls alerts and applies dedup before processing.
+
+### Run budgets
+
+One run has limits on the whole: `AGENT_RUN_MAX_SECONDS` (900), `AGENT_RUN_MAX_TOOL_CALLS` (150, shared by all agents and attempts) and `AGENT_RUN_MAX_LLM_CALLS` (60, counted for the Fixer). They are checked before each stage, and a tool or model call past the limit is refused. Exceeding one escalates the change with the reason ("run budget exceeded: the run used its 900s time limit"); a fix that is already verified and reviewed is not thrown away because packaging ran past the clock. What a run used is recorded on it (`agent_run.budget`). Tokens are not counted because the model client does not report usage, and the Investigator's and Critic's model use is bounded by their own step limits.
+
+### Shadow mode
+
+`AGENT_RUN_MODE=shadow` runs the same agents (investigate, fix in a throwaway worktree on `agent-shadow/...`, verify, review) on every new incident, but records the result only as the change's `shadow` report. It cannot move the change's state, set its issue type or confidence, record dev-execution evidence, or open the approval gate, and the normal run endpoint is refused in this mode. The dashboard shows each shadow run as "not in effect". `GET /v1/shadow/report` sets what the agents would have done against what people did (released, rejected or undecided): the diagnosis against the keyword triage, and the files they would have changed against the files a person released. People never see the agents' proposals in shadow mode, so this is a proxy and the report says so. `POST /v1/changes/{id}/shadow-run` runs the agents on an existing change.
+
+### Kafka (optional)
+
+`EVENT_BUS_MODE=kafka` with `KAFKA_BOOTSTRAP_SERVERS` (and `pip install confluent-kafka`) puts events on Kafka. With JSON storage the store publishes to Kafka after each write; with Postgres storage the Postgres outbox stays the store's bus and a relay forwards it to Kafka, so an event is never lost between the database commit and the broker. Consumers (such as the outcome learner) read from Kafka. This is tested against an in-memory stand-in for the client, not a real broker.
 
 ## Learning From Outcomes and Postmortems
 
@@ -362,6 +375,7 @@ A run ends in exactly one of two places: `ready_for_prod` (a verified, reviewed 
 | `off` | No runs. |
 | `manual` | `POST /v1/changes/{id}/investigate` (or the dashboard's **Run Agents** button) starts a run in the background. |
 | `auto` | Every new incident, from the API or the scheduler, starts a run. |
+| `shadow` | Every new incident gets an observe-only run (see Shadow Mode below). Real runs are refused. |
 
 Try it without a real alert: `GET /v1/scenarios` lists simulated incidents and `POST /v1/incidents/scenario/{name}` opens a change from one (the dashboard has a picker). That endpoint is refused when real metrics are configured. `GET /v1/changes/{id}/agent-run` returns the reports, and the dashboard shows the diagnosis, evidence, each attempt's checks and the Critic's concerns.
 

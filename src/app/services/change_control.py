@@ -455,10 +455,69 @@ class ChangeControlStore:
 
         return self._mutate(change_id, apply, action="agent.ready_for_approval", actor=actor)
 
+    # ---- shadow runs: the same agents, observing only. Nothing here moves the change's state. ----
+
+    def begin_shadow_run(self, change_id: str, actor: str) -> ChangeRecord:
+        def apply(record: ChangeRecord) -> ChangeRecord:
+            if record.shadow.get("status") == "running":
+                raise ValueError("A shadow run is already in progress for this change")
+            if record.agent_run_status == "running":
+                raise ValueError("An agent run is in progress for this change")
+            if record.status != "pending_approval":
+                raise ValueError("Change decision already finalized")
+            if not record.alert:
+                raise ValueError("No alert was recorded for this change, so there is nothing to investigate")
+            runs = int(record.shadow.get("run", 0)) + 1
+            started = datetime.now(timezone.utc).isoformat()
+            return record.model_copy(update={"shadow": {"run": runs, "status": "running", "started_at": started, "attempts": []}})
+
+        return self._mutate(change_id, apply, action="shadow.started", actor=actor)
+
+    def record_shadow_step(
+        self,
+        change_id: str,
+        actor: str,
+        action: str,
+        patch: dict | None = None,
+        escalation_reason: str = "",
+        note: str = "",
+        escalated: bool = False,
+    ) -> ChangeRecord:
+        def apply(record: ChangeRecord) -> ChangeRecord:
+            if record.shadow.get("status") != "running":
+                raise ValueError("No shadow run is in progress for this change")
+            shadow = {**record.shadow, **(patch or {})}
+            if escalated:
+                shadow.update(
+                    status="escalated", escalation_reason=escalation_reason, finished_at=datetime.now(timezone.utc).isoformat()
+                )
+            return record.model_copy(update={"shadow": shadow})
+
+        details = {**({"reason": escalation_reason} if escalation_reason else {}), **({"note": note} if note else {})}
+        return self._mutate(change_id, apply, action=f"shadow.{action}", actor=actor, details=details)
+
+    def finish_shadow_run(self, change_id: str, actor: str, patch: dict | None = None) -> ChangeRecord:
+        def apply(record: ChangeRecord) -> ChangeRecord:
+            if record.shadow.get("status") != "running":
+                raise ValueError("No shadow run is in progress for this change")
+            shadow = {**record.shadow, **(patch or {}), "status": "ready", "finished_at": datetime.now(timezone.utc).isoformat()}
+            return record.model_copy(update={"shadow": shadow})
+
+        return self._mutate(change_id, apply, action="shadow.ready", actor=actor)
+
     def recover_interrupted_runs(self, actor: str = "system") -> list[str]:
         """After a restart no run is still going: escalate any that were left `running`."""
         recovered: list[str] = []
         for record in self.list_changes():
+            if record.shadow.get("status") == "running":
+                try:
+                    self.record_shadow_step(
+                        record.change_id, actor, "interrupted", escalation_reason="the shadow run was interrupted by a restart",
+                        escalated=True,
+                    )
+                    recovered.append(record.change_id)
+                except ValueError:
+                    pass
             if record.agent_run_status != "running":
                 continue
             try:

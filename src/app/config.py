@@ -152,6 +152,12 @@ class Settings:
     agent_run_mode: str = "off"
     agent_max_fix_attempts: int = 3
     agent_run_workers: int = 2
+    event_bus_mode: str = "auto"
+    kafka_bootstrap_servers: str = ""
+    kafka_client_id: str = "incidentflow"
+    agent_run_max_seconds: float = 900.0
+    agent_run_max_tool_calls: int = 150
+    agent_run_max_llm_calls: int = 60
 
 
 _TOOL_MODES = {
@@ -163,7 +169,8 @@ _TOOL_MODES = {
     "DEV_METRICS_MODE": ("dev_metrics_mode", {"mock", "prometheus"}),
     "FIXER_MODE": ("fixer_mode", {"off", "llm"}),
     "CRITIC_MODE": ("critic_mode", {"rules", "llm"}),
-    "AGENT_RUN_MODE": ("agent_run_mode", {"off", "manual", "auto"}),
+    "AGENT_RUN_MODE": ("agent_run_mode", {"off", "manual", "auto", "shadow"}),
+    "EVENT_BUS_MODE": ("event_bus_mode", {"auto", "kafka"}),
     "MOCK_DEV_EFFECT": ("mock_dev_effect", {"resolves", "no_effect", "partial", "regresses_other", "deploy_fails"}),
 }
 
@@ -200,6 +207,12 @@ def validate_settings(settings: "Settings") -> None:
             errors.append(f"{env_name}=llm requires LLM_API_KEY")
     if not 1 <= settings.agent_max_fix_attempts <= 5:
         errors.append("AGENT_MAX_FIX_ATTEMPTS must be between 1 and 5")
+    if settings.event_bus_mode == "kafka" and not settings.kafka_bootstrap_servers:
+        errors.append("EVENT_BUS_MODE=kafka requires KAFKA_BOOTSTRAP_SERVERS")
+    if settings.agent_run_max_seconds <= 0:
+        errors.append("AGENT_RUN_MAX_SECONDS must be positive")
+    if settings.agent_run_max_tool_calls < 1 or settings.agent_run_max_llm_calls < 1:
+        errors.append("AGENT_RUN_MAX_TOOL_CALLS and AGENT_RUN_MAX_LLM_CALLS must be at least 1")
     if not 1 <= settings.agent_run_workers <= 8:
         errors.append("AGENT_RUN_WORKERS must be between 1 and 8")
     if not 1 <= settings.fixer_max_steps <= 50:
@@ -352,4 +365,10 @@ def load_settings(base_dir: str | None = None) -> Settings:
         agent_run_mode=os.getenv("AGENT_RUN_MODE", "off").strip().lower(),
         agent_max_fix_attempts=_as_int(os.getenv("AGENT_MAX_FIX_ATTEMPTS"), default=3),
         agent_run_workers=_as_int(os.getenv("AGENT_RUN_WORKERS"), default=2),
+        event_bus_mode=os.getenv("EVENT_BUS_MODE", "auto").strip().lower(),
+        kafka_bootstrap_servers=os.getenv("KAFKA_BOOTSTRAP_SERVERS", "").strip(),
+        kafka_client_id=os.getenv("KAFKA_CLIENT_ID", "incidentflow").strip() or "incidentflow",
+        agent_run_max_seconds=_as_float(os.getenv("AGENT_RUN_MAX_SECONDS"), default=900.0),
+        agent_run_max_tool_calls=_as_int(os.getenv("AGENT_RUN_MAX_TOOL_CALLS"), default=150),
+        agent_run_max_llm_calls=_as_int(os.getenv("AGENT_RUN_MAX_LLM_CALLS"), default=60),
     )

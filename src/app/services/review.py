@@ -42,6 +42,7 @@ ACTION_LABELS = {
     "agent.ready_for_approval": "Verified fix ready for approval",
     "agent.interrupted": "Run interrupted by a restart",
     "agent.failed": "Run failed unexpectedly",
+    "agent.ready": "A verified fix would be ready for approval",
     "dev.recorded": "Dev validation recorded",
     "pr.prepared": "Draft PR prepared",
     "decision.approved": "Approved",
@@ -95,6 +96,14 @@ def overview_row(record: ChangeRecord) -> dict[str, Any]:
 
 # Actors that are the platform itself, not a model and not a person.
 SYSTEM_ACTORS = {"system", "pipeline", "scheduler-agent", "auth-disabled"}
+
+
+def _label(action: str) -> str:
+    """Plain wording for an audit action; shadow-run entries get the same wording marked as shadow."""
+    if action.startswith("shadow."):
+        rest = action.removeprefix("shadow.")
+        return f"{ACTION_LABELS.get(f'agent.{rest}', rest.replace('_', ' ').capitalize())} (shadow)"
+    return ACTION_LABELS.get(action, action)
 
 
 def _actor_kind(actor: str) -> str:
@@ -153,7 +162,7 @@ def build_timeline(entries: list[AuditEntry]) -> list[dict[str, Any]]:
                 "actor_name": _actor_name(entry.actor),
                 "actor_kind": _actor_kind(entry.actor),
                 "kind": "state" if entry.from_state != entry.to_state else "event",
-                "label": ACTION_LABELS.get(entry.action, entry.action),
+                "label": _label(entry.action),
                 "from_state": entry.from_state,
                 "to_state": entry.to_state,
                 "note": note,
@@ -175,7 +184,12 @@ def build_actions(record: ChangeRecord, store: ChangeControlStore, agent_mode: s
     """The actions a person could take on this change right now, each with the reason when it cannot be."""
     working = "The agents are still working on this change" if record.agent_run_status == "running" else None
 
-    run_blocker = "Agent runs are disabled (AGENT_RUN_MODE=off)" if agent_mode == "off" else agent_start_blocker(record)
+    if agent_mode == "off":
+        run_blocker: str | None = "Agent runs are disabled (AGENT_RUN_MODE=off)"
+    elif agent_mode == "shadow":
+        run_blocker = "Agents are in shadow mode: they observe and report, and nothing they produce enters approval"
+    else:
+        run_blocker = agent_start_blocker(record)
     approve_blocker = working or decision_blocker(record, "approve")
     reject_blocker = decision_blocker(record, "reject")
     promote_blocker = working or store.promotion_blocker(record)
@@ -304,6 +318,25 @@ def _critic(run: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
+def _shadow(record: ChangeRecord) -> dict[str, Any] | None:
+    """What the agents would have done in a shadow run. None if there was none. It has no effect on the change."""
+    shadow = record.shadow
+    if not shadow:
+        return None
+    status = shadow.get("status")
+    return {
+        "run": shadow.get("run"),
+        "status": status,
+        "would": {"ready": "propose_a_verified_fix", "escalated": "escalate"}.get(status),
+        "escalation_reason": shadow.get("escalation_reason", ""),
+        "diagnosis": _diagnosis(shadow),
+        "fix": _fix(shadow),
+        "verification": _verification(shadow),
+        "critic": _critic(shadow),
+        "budget": shadow.get("budget"),
+    }
+
+
 def build_review(
     record: ChangeRecord,
     entries: list[AuditEntry],
@@ -330,6 +363,7 @@ def build_review(
         "fix": _fix(run),
         "verification": _verification(run),
         "critic": _critic(run),
+        "shadow": _shadow(record),
         "policy": {"passes": not reasons, "reasons": reasons},
         "approval": {
             "status": record.status,

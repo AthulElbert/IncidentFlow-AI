@@ -67,12 +67,42 @@ class ToolBudget:
             self.used += 1
             return True
 
+    def refund(self) -> None:
+        """Give back a call that was counted but then not made."""
+        with self._lock:
+            self.used = max(0, self.used - 1)
+
+
+class ChainedBudget:
+    """An agent's own call cap that also draws on a total shared by every agent in the run."""
+
+    def __init__(self, own: ToolBudget, shared: ToolBudget) -> None:
+        self.own = own
+        self.shared = shared
+
+    @property
+    def max_calls(self) -> int:
+        return self.own.max_calls
+
+    @property
+    def used(self) -> int:
+        return self.own.used
+
+    def spend(self) -> bool:
+        """Count one call against both caps; a refused call counts against neither."""
+        if not self.own.spend():
+            return False
+        if not self.shared.spend():
+            self.own.refund()
+            return False
+        return True
+
 
 @dataclass
 class ToolContext:
     actor: str
     entity_id: str
-    budget: ToolBudget
+    budget: ToolBudget | ChainedBudget
     audit: AuditLog | None = None
 
 

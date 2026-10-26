@@ -22,6 +22,7 @@ from typing import Any, Callable, Protocol, TypedDict
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
+from app.agents.budget import BudgetLimits, RunBudget
 from app.agents.critic import Critic
 from app.agents.fixer import Fixer
 from app.agents.investigator import Investigator
@@ -29,7 +30,7 @@ from app.agents.models import FixProposal, IncidentContext, InvestigationReport,
 from app.agents.verifier import Verifier
 from app.audit import AuditLog
 from app.services.change_control import ChangeControlStore
-from app.tools.instrumentation import Toolkit
+from app.tools.instrumentation import ChainedBudget, ToolBudget, Toolkit
 from app.tools.sandbox import FileSandbox
 
 logger = logging.getLogger("app.agent_graph")
@@ -69,14 +70,14 @@ class RunState(TypedDict, total=False):
     crashed: str
 
 
-def branch_for(change_id: str, service: str) -> str:
+def branch_for(change_id: str, service: str, namespace: str = "agent-fix") -> str:
     """The branch an agent run works on.
 
     Deliberately not `agent/...`, which the prepare-pr flow uses for the same change: recreating that
     branch would reset it and discard commits the PR flow made there.
     """
     slug = re.sub(r"[^a-zA-Z0-9]+", "-", service.strip().lower()).strip("-") or "service"
-    return f"agent-fix/{change_id.lower()}-{slug}"
+    return f"{namespace}/{change_id.lower()}-{slug}"
 
 
 @dataclass
@@ -90,7 +91,14 @@ class AgentRuntime:
     critic: Critic
     audit: AuditLog | None = None
     max_attempts: int = 3
+    budget_limits: BudgetLimits = field(default_factory=BudgetLimits)
     _sandboxes: dict[str, FileSandbox] = field(default_factory=dict)
+    _budgets: dict[str, RunBudget] = field(default_factory=dict)
+
+    def budget_for(self, change_id: str) -> RunBudget:
+        if change_id not in self._budgets:
+            self._budgets[change_id] = RunBudget(self.budget_limits)
+        return self._budgets[change_id]
 
     def sandbox_for(self, change_id: str, branch: str) -> FileSandbox:
         if change_id not in self._sandboxes:
@@ -99,6 +107,7 @@ class AgentRuntime:
 
     def release(self, change_id: str) -> None:
         self._sandboxes.pop(change_id, None)
+        self._budgets.pop(change_id, None)
 
 
 def _short_checks(report: dict) -> list[dict]:
@@ -108,9 +117,18 @@ def _short_checks(report: dict) -> list[dict]:
 def build_incident_graph(runtime: AgentRuntime, checkpointer: Any | None = None):
     store = runtime.change_store
 
+    def tools_for(agent: str, change_id: str, sandbox: FileSandbox | None = None):
+        """An agent's tools, counted against its own cap and against the run's total."""
+        budget = ChainedBudget(ToolBudget(runtime.toolkit.max_calls_per_run), runtime.budget_for(change_id).tool_calls)
+        return runtime.toolkit.for_agent(agent, entity_id=change_id, audit=runtime.audit, budget=budget, sandbox=sandbox)
+
     def guarded(name: str, node: Callable[[RunState], dict]) -> Callable[[RunState], dict]:
         def run(state: RunState) -> dict:
             try:
+                # A finished, reviewed fix is not thrown away because the clock ran out while packaging it.
+                limit = None if name == "package" else runtime.budget_for(state["change_id"]).exceeded()
+                if limit:
+                    return escalate(state, ORCHESTRATOR, f"run budget exceeded: {limit}")
                 return node(state)
             except Exception as exc:  # never leave the change stuck in a working state
                 logger.exception("agent-node-crashed", extra={"node": name, "change_id": state.get("change_id")})
@@ -119,9 +137,8 @@ def build_incident_graph(runtime: AgentRuntime, checkpointer: Any | None = None)
         return run
 
     def escalate(state: RunState, actor: str, reason: str, run_patch: dict | None = None, **fields) -> dict:
-        store.record_agent_step(
-            state["change_id"], actor, "escalated", "agent.escalated", run_patch or {}, escalation_reason=reason, **fields
-        )
+        patch = {**(run_patch or {}), "budget": runtime.budget_for(state["change_id"]).usage()}
+        store.record_agent_step(state["change_id"], actor, "escalated", "agent.escalated", patch, escalation_reason=reason, **fields)
         return {"outcome": "escalated", "next_step": "end"}
 
     # ------------------------------------------------------------------- nodes
@@ -129,7 +146,7 @@ def build_incident_graph(runtime: AgentRuntime, checkpointer: Any | None = None)
     def investigate(state: RunState) -> dict:
         change_id = state["change_id"]
         ctx = IncidentContext(**state["ctx"])
-        tools = runtime.toolkit.for_agent("investigator", entity_id=change_id, audit=runtime.audit)
+        tools = tools_for("investigator", change_id)
         report = runtime.investigator.investigate(ctx, tools)
         dump = report.model_dump(mode="json")
         top = report.top
@@ -158,10 +175,11 @@ def build_incident_graph(runtime: AgentRuntime, checkpointer: Any | None = None)
         store.record_agent_step(
             change_id, ORCHESTRATOR, "fixing", "agent.fixing", {"attempts": state.get("attempts", [])}, note=f"attempt {attempt}"
         )
-        tools = runtime.toolkit.for_agent("fixer", entity_id=change_id, audit=runtime.audit, sandbox=sandbox)
+        tools = tools_for("fixer", change_id, sandbox)
         result = runtime.fixer.propose(
             ctx, investigation.hypotheses[0], investigation.evidence, tools,
             branch=state["branch"], feedback=state.get("feedback", ""), attempt=attempt,
+            llm_gate=runtime.budget_for(change_id).spend_llm,
         )
         entry = {
             "attempt": attempt,
@@ -188,7 +206,7 @@ def build_incident_graph(runtime: AgentRuntime, checkpointer: Any | None = None)
         sandbox = runtime.sandbox_for(change_id, state["branch"])
 
         store.record_agent_step(change_id, ORCHESTRATOR, "verifying", "agent.verifying", {"attempts": state["attempts"]})
-        tools = runtime.toolkit.for_agent("verifier", entity_id=change_id, audit=runtime.audit, sandbox=sandbox)
+        tools = tools_for("verifier", change_id, sandbox)
         report = runtime.verifier.verify(
             ctx, FixProposal(**state["proposal"]), tools, issue_type=investigation.hypotheses[0].issue_type
         )
@@ -222,7 +240,7 @@ def build_incident_graph(runtime: AgentRuntime, checkpointer: Any | None = None)
         sandbox = runtime.sandbox_for(change_id, state["branch"])
 
         store.record_agent_step(change_id, ORCHESTRATOR, "reviewing", "agent.reviewing", {"attempts": state["attempts"]})
-        tools = runtime.toolkit.for_agent("critic", entity_id=change_id, audit=runtime.audit, sandbox=sandbox)
+        tools = tools_for("critic", change_id, sandbox)
         review_ = runtime.critic.review(ctx, investigation, FixProposal(**state["proposal"]), verification, tools)
         dump = review_.model_dump(mode="json")
         attempts = [dict(item) for item in state["attempts"]]
@@ -270,6 +288,7 @@ def build_incident_graph(runtime: AgentRuntime, checkpointer: Any | None = None)
             "changed_files": review_.get("changed_files", []),
             "risk": review_["risk"],
             "summary": notes,
+            "budget": runtime.budget_for(state["change_id"]).usage(),
         }
         store.finish_agent_run(
             state["change_id"], VERIFIER_ACTOR, verification.deploy_url, round(improvement * 100, 1), notes, patch

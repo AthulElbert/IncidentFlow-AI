@@ -276,6 +276,7 @@
     ul.evidence { list-style: none; padding-left: 0; margin: 6px 0 0; font-size: 0.82rem; }
     ul.evidence li { padding: 3px 0; border-bottom: 1px dashed var(--line); }
     ul.evidence li.supports { background: #f0fdf4; }
+    .shadow-box { border: 1px dashed #94a3b8; border-radius: 12px; padding: 12px; background: #f8fafc; }
     ol.timeline { list-style: none; margin: 8px 0 0 8px; padding: 0; border-left: 2px solid var(--line); }
     li.tl { display: flex; gap: 8px; padding: 5px 0 5px 10px; font-size: 0.83rem; }
     .tl-icon { width: 20px; text-align: center; flex: none; }
@@ -428,6 +429,7 @@
         <div class="kpi warn"><div class="label">Agent Escalation Rate</div><div id="k-escal" class="value">0%</div></div>
         <div class="kpi bad"><div class="label">Human Override Rate</div><div id="k-override" class="value">0%</div></div>
       </div>
+      <div id="shadowReport"></div>
     </div>
 
     <div class="panel bars">
@@ -538,6 +540,7 @@
         setKpi("k-ready", asPct(m.agent_fix_ready_rate));
         setKpi("k-escal", asPct(m.agent_escalation_rate));
         setKpi("k-override", asPct(m.human_override_rate));
+        loadShadowReport();
         const total = Number(m.total_changes || 0);
         renderBars("issueBars", m.issue_type_counts, total);
         renderBars("stateBars", m.deployment_state_counts, total);
@@ -838,7 +841,7 @@
 
     function factRow(label, html) { return `<div class="fact"><div class="k">${label}</div><div>${html}</div></div>`; }
 
-    function reviewFacts(review, c) {
+    function reviewFacts(review, c, showPolicy = true) {
       const d = review.diagnosis;
       const rows = [];
       if (d) {
@@ -846,7 +849,9 @@
           (d.alternatives.length ? `<br><span class="k">Also considered: ${d.alternatives.map((a) => `${escapeHtml(a.issue_type)} ${Number(a.confidence).toFixed(2)}`).join(", ")}</span>` : "")));
       }
       if (review.fix) {
-        rows.push(factRow("Change", `${review.fix.files.map(escapeHtml).join(", ") || "no files"}<br><span class="k">branch ${escapeHtml(review.fix.branch)} · verified on attempt ${review.fix.attempts}${review.fix.summary ? " · " + escapeHtml(review.fix.summary) : ""}</span>`));
+        const verified = review.verification && review.verification.verdict === "passed" ? "verified on attempt" : "attempt";
+        const detail = [review.fix.branch ? `branch ${escapeHtml(review.fix.branch)}` : "", `${verified} ${review.fix.attempts}`, review.fix.summary ? escapeHtml(review.fix.summary) : ""].filter(Boolean).join(" · ");
+        rows.push(factRow("Change", `${review.fix.files.map(escapeHtml).join(", ") || "no files"}<br><span class="k">${detail}</span>`));
       }
       const v = review.verification;
       if (v) {
@@ -861,7 +866,7 @@
         rows.push(factRow("Critic", `${pillFor(k.decision, verdictKind(k.decision))} risk <strong>${escapeHtml(k.risk)}</strong> · ${k.changed_lines} changed line(s)` +
           (concerns ? `<ul class="policy-list">${concerns}</ul>` : "")));
       }
-      rows.push(factRow("Policy gate", review.policy.passes
+      if (showPolicy) rows.push(factRow("Policy gate", review.policy.passes
         ? `<span class="policy-ok">Passes</span>`
         : `<ul class="policy-list">${review.policy.reasons.map((r) => `<li>${escapeHtml(r)}</li>`).join("")}</ul>`));
       return `<div class="facts">${rows.join("")}</div>`;
@@ -984,6 +989,38 @@
       }
     }
 
+    function shadowHtml(review, c) {
+      const s = review.shadow;
+      if (!s) return "";
+      const label = { running: "Running", ready: "Would put a verified fix up for approval", escalated: "Would hand it to a person" }[s.status] || s.status;
+      const kind = s.status === "ready" ? "ok" : (s.status === "escalated" ? "warn" : "info");
+      const facts = reviewFacts({ diagnosis: s.diagnosis, fix: s.fix, verification: s.verification, critic: s.critic, policy: { passes: true, reasons: [] } }, c, false);
+      const budget = s.budget ? `<p class="status" style="margin:6px 0 0;">Used ${s.budget.tool_calls} tool calls, ${s.budget.llm_calls} model calls, ${s.budget.seconds}s.</p>` : "";
+      const diff = s.fix && s.fix.diff ? `<details data-key="shadowdiff" class="section-block"><summary class="k">Diff the agents would have proposed</summary>${diffHtml(s.fix.diff)}</details>` : "";
+      return `<div class="section-block shadow-box"><strong>Shadow run #${escapeHtml(s.run || 1)}</strong> ${pillFor(label, kind)}
+        <span class="k">Observe-only: nothing here entered approval, and this change's state is unchanged.</span>
+        ${s.escalation_reason ? `<p class="status" style="white-space:pre-wrap;margin:6px 0 0;">${escapeHtml(s.escalation_reason)}</p>` : ""}
+        ${facts}${budget}${diff}</div>`;
+    }
+
+    function shadowReportHtml(r) {
+      if (!r || (!r.runs && !r.running)) return "";
+      const cell = (agent, human) => (r.against_what_people_did[agent] || {})[human] || 0;
+      const row = (agent, label) => `<tr><td>${label}</td><td>${cell(agent, "released")}</td><td>${cell(agent, "rejected")}</td><td>${cell(agent, "undecided")}</td></tr>`;
+      const d = r.diagnosis_agreement_with_triage, f = r.files;
+      return `<div class="shadow-box" style="margin-top:12px;"><strong>Shadow mode: what the agents would have done</strong>
+        <span class="k"> · ${r.runs} finished run(s)${r.running ? `, ${r.running} running` : ""}</span>
+        <table class="changes"><thead><tr><th>Agents would</th><th>Person released</th><th>Person rejected</th><th>Undecided</th></tr></thead>
+        <tbody>${row("fix_ready", "put a verified fix up for approval")}${row("escalated", "hand it to a person")}</tbody></table>
+        <p class="status">Diagnosis matched the keyword triage in ${d.same} of ${d.compared}. Files: ${f.same} same, ${f.overlapping} overlapping, ${f.different} different (of ${f.compared} compared).</p>
+        <p class="status">${escapeHtml(r.caveat)}</p></div>`;
+    }
+
+    async function loadShadowReport() {
+      try { el("shadowReport").innerHTML = shadowReportHtml(await api("/v1/shadow/report", { role: "viewer" })); }
+      catch { el("shadowReport").innerHTML = ""; }
+    }
+
     function bannerHtml(review, c) {
       let kind = (ATTENTION[review.attention] || [])[1] || "";
       if (c.deployment_state === "promoted_to_prod") kind = "ok";
@@ -1045,6 +1082,7 @@
           bannerHtml(review, c),
           approvalPanel(review, c),
           promotionPanel(review, c, identity),
+          shadowHtml(review, c),
           runSummaryHtml(review, c),
           evidenceHtml(review),
           timelineHtml(review),

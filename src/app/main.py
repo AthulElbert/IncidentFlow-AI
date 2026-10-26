@@ -11,7 +11,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from app.adapters.jenkins_client import wait_for_build
 from app.audit import AuditEntry, JsonlAuditLog, PostgresAuditLog
 from app.config import load_settings, validate_settings
+from app.events.bus import INCIDENT_EVENTS_TOPIC
 from app.events.inprocess import InProcessBus
+from app.events.kafka import KafkaBus, relay
 from app.events.postgres import PostgresBus
 from app.logging_config import setup_logging
 from app.models.schemas import (
@@ -51,6 +53,7 @@ from app.services.metrics import build_metrics_summary
 from app.services.pipeline import SupportAgentPipeline
 from app.services.pr_preparer import PRPreparationService
 from app.services.postmortem import build_postmortem
+from app.services.shadow import build_shadow_report
 from app.services.review import build_review, overview_row
 from app.services.scheduler import AlertDedupStore, IncidentScheduler
 from app.services.triage_agent import TriageAgent
@@ -58,6 +61,7 @@ from app.storage import atomic_write_text
 from app.replay import event_for
 from app.tools.factory import build_toolkit
 from app.tools.scenarios import DEFAULT_SCENARIOS
+from app.agents.budget import BudgetLimits
 from app.agents.critic import Critic
 from app.agents.graph import AgentRuntime
 from app.agents.fixer import Fixer
@@ -78,10 +82,19 @@ kb_path = str(data_dir / "incident_history.json")
 change_path = str(data_dir / "change_records.json")
 if settings.storage_backend == "postgres":
     audit_log = PostgresAuditLog(settings.database_url)
-    event_bus = PostgresBus(settings.database_url)
+    event_bus = PostgresBus(settings.database_url)  # the transactional outbox: written with each state change
 else:
     audit_log = JsonlAuditLog(data_dir / "audit_log.jsonl")
     event_bus = InProcessBus()
+# Kafka is optional. With Postgres storage the outbox above stays the store's bus and `relay` forwards it to Kafka;
+# with JSON storage the store publishes to Kafka directly after each write (best effort, like the in-process bus).
+kafka_bus = None
+consumer_bus = event_bus
+if settings.event_bus_mode == "kafka":
+    kafka_bus = KafkaBus(settings.kafka_bootstrap_servers, client_id=settings.kafka_client_id)
+    consumer_bus = kafka_bus
+    if settings.storage_backend != "postgres":
+        event_bus = kafka_bus
 change_store = ChangeControlStore(
     change_path,
     policy=PolicyConfig(
@@ -206,17 +219,30 @@ agent_runtime = AgentRuntime(
     critic=critic,
     audit=audit_log,
     max_attempts=settings.agent_max_fix_attempts,
+    budget_limits=BudgetLimits(
+        max_seconds=settings.agent_run_max_seconds,
+        max_tool_calls=settings.agent_run_max_tool_calls,
+        max_llm_calls=settings.agent_run_max_llm_calls,
+    ),
 )
 agent_runner = AgentRunner(agent_runtime, workers=settings.agent_run_workers)
 # A restart ends any run that was in flight; make that visible instead of leaving it "running".
 change_store.recover_interrupted_runs()
 
 # What happened to a change becomes what incident memory knows. The sweep covers events the bus lost in a restart.
-outcome_learner = OutcomeLearner(change_store, pipeline.kb, event_bus)
+outcome_learner = OutcomeLearner(change_store, pipeline.kb, consumer_bus)
 outcome_learner.reconcile()
 learning_loop = ConsumerLoop("learning", outcome_learner.run_once, interval_seconds=2.0)
+relay_loop = (
+    ConsumerLoop("kafka-relay", lambda: relay(event_bus, kafka_bus, INCIDENT_EVENTS_TOPIC), interval_seconds=1.0)
+    if kafka_bus is not None and settings.storage_backend == "postgres"
+    else None
+)
 if settings.agent_run_mode == "auto":
     pipeline.on_change_created = lambda change_id: agent_runner.start(change_id, actor="agent:orchestrator")
+elif settings.agent_run_mode == "shadow":
+    # Observe only: the agents work on every new incident, but nothing they produce enters the approval flow.
+    pipeline.on_change_created = lambda change_id: agent_runner.start_shadow(change_id, actor="agent:orchestrator")
 
 scheduler_dedup_path = str(base_dir / settings.scheduler_dedup_file)
 alert_dedup_store = AlertDedupStore(file_path=scheduler_dedup_path)
@@ -284,7 +310,11 @@ async def _lifespan(_: FastAPI):
     if settings.apm_poll_mode == "poll":
         scheduler.start()
     learning_loop.start()
+    if relay_loop is not None:
+        relay_loop.start()
     yield
+    if relay_loop is not None:
+        relay_loop.stop()
     learning_loop.stop()
     scheduler.stop()
     agent_runner.shutdown()
@@ -477,6 +507,11 @@ def start_agent_run(change_id: str, principal: Principal = Depends(approver_auth
     """Run the Investigator, Fixer, Verifier and Critic for this change, in the background."""
     if settings.agent_run_mode == "off":
         raise HTTPException(status_code=409, detail="Agent runs are disabled (AGENT_RUN_MODE=off)")
+    if settings.agent_run_mode == "shadow":
+        raise HTTPException(
+            status_code=409,
+            detail="Agents are in shadow mode (AGENT_RUN_MODE=shadow): they observe and report, and nothing they produce enters approval",
+        )
     try:
         record, _ = agent_runner.start(change_id, actor=principal.actor)
     except ValueError as exc:
@@ -490,6 +525,28 @@ def start_agent_run(change_id: str, principal: Principal = Depends(approver_auth
         "deployment_state": record.deployment_state,
         "run": record.agent_run.get("run"),
     }
+
+
+@app.post("/v1/changes/{change_id}/shadow-run", status_code=202)
+def start_shadow_run(change_id: str, principal: Principal = Depends(approver_auth)) -> dict:
+    """Run the agents on this change in observe-only mode (AGENT_RUN_MODE=shadow). Never touches its state."""
+    if settings.agent_run_mode != "shadow":
+        raise HTTPException(status_code=409, detail="Shadow runs need AGENT_RUN_MODE=shadow")
+    try:
+        record, _ = agent_runner.start_shadow(change_id, actor=principal.actor)
+    except ValueError as exc:
+        message = str(exc)
+        if message == "Change not found":
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=409, detail=message) from exc
+    return {"change_id": record.change_id, "shadow_status": record.shadow.get("status"), "run": record.shadow.get("run")}
+
+
+@app.get("/v1/shadow/report")
+def get_shadow_report(principal: Principal = Depends(viewer_auth)) -> dict:
+    """What the agents would have done on past incidents, set against what people did."""
+    _ = principal
+    return build_shadow_report(change_store.list_changes())
 
 
 @app.get("/v1/changes/{change_id}/agent-run")
