@@ -1,20 +1,30 @@
 ﻿import json
+import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Callable
 from uuid import uuid4
 
+from app.audit import PG_AUDIT_SCHEMA, AuditEntry, AuditLog, new_audit_entry, pg_insert_audit
+from app.db import pg_connect
+from app.events.bus import INCIDENT_EVENTS_TOPIC, Event, EventBus, make_event
+from app.events.postgres import PG_EVENT_SCHEMA, pg_insert_event
 from app.models.schemas import (
     UNSAFE_BUILD_STATES_FOR_PROD,
     ApprovalDecisionRequest,
     ChangeRecord,
     PromoteRequest,
 )
+from app.services.lifecycle import TERMINAL_STATES, assert_transition
 from app.storage import atomic_write_text
 
+logger = logging.getLogger("app.change_control")
+
 _PROMOTION_TERMINAL_STATES = {"promoted_to_prod", "prod_promotion_failed"}
+# A change in one of these states is finished (or being deployed) and must not absorb new alerts.
+_CLOSED_FOR_CORRELATION = TERMINAL_STATES | _PROMOTION_TERMINAL_STATES | {"promoting", "monitoring"}
 
 _PG_SCHEMA = (
     """
@@ -26,6 +36,8 @@ _PG_SCHEMA = (
     )
     """,
     "ALTER TABLE change_records ADD COLUMN IF NOT EXISTS version INT NOT NULL DEFAULT 1",
+    *PG_AUDIT_SCHEMA,
+    *PG_EVENT_SCHEMA,
 )
 
 
@@ -51,6 +63,15 @@ class PolicyConfig:
 
 
 class ChangeControlStore:
+    """Owns change records, their lifecycle, and the audit trail of every change to them.
+
+    Each successful write also produces one audit entry and one `incident.events`
+    event. With Postgres they are inserted in the same transaction as the state
+    change, so a committed change always has its audit entry and event. With the
+    JSON backend they are appended right after the state file is written and a
+    failure there is logged rather than raised (acceptable for local use).
+    """
+
     _MAX_WRITE_ATTEMPTS = 3
 
     def __init__(
@@ -59,12 +80,16 @@ class ChangeControlStore:
         policy: PolicyConfig | None = None,
         storage_backend: str = "json",
         database_url: str = "",
+        audit: AuditLog | None = None,
+        bus: EventBus | None = None,
     ) -> None:
         self.data_path = Path(data_file)
         self._lock = Lock()
         self.policy = policy or PolicyConfig()
         self.storage_backend = storage_backend.strip().lower()
         self.database_url = database_url.strip()
+        self.audit = audit
+        self.bus = bus
         self._use_postgres = self.storage_backend == "postgres"
         self._schema_ready = False
         self._records: list[ChangeRecord] = self._load()
@@ -111,6 +136,30 @@ class ChangeControlStore:
                 return list(self._records)
             return [item for item in self._records if item.status == status]
 
+    def find_open_change(
+        self,
+        service: str,
+        environment: str,
+        within_minutes: float,
+        now: datetime | None = None,
+    ) -> ChangeRecord | None:
+        """Most recently touched unapproved change for this service/environment inside the window."""
+        if within_minutes <= 0:
+            return None
+        reference = now or datetime.now(timezone.utc)
+        cutoff = reference - timedelta(minutes=within_minutes)
+        candidates = [
+            item
+            for item in self.list_changes(status="pending_approval")
+            if item.service == service
+            and item.environment == environment
+            and item.deployment_state not in _CLOSED_FOR_CORRELATION
+            and (item.last_alert_at or item.created_at) >= cutoff
+        ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda item: item.last_alert_at or item.created_at)
+
     # --------------------------------------------------------------- mutations
 
     def create_change(
@@ -129,6 +178,7 @@ class ChangeControlStore:
         warning_count: int,
         jenkins_status: str,
         jira_sync_status: str = "synced",
+        actor: str = "pipeline",
     ) -> ChangeRecord:
         with self._lock:
             seed_record = ChangeRecord(
@@ -151,13 +201,43 @@ class ChangeControlStore:
             )
             reasons = self._evaluate_policy(seed_record)
             record = seed_record.model_copy(update={"policy_reasons": reasons})
+            entry, event = self._emission(
+                "change.created",
+                actor,
+                None,
+                record,
+                {"incident_id": incident_id, "issue_type": issue_type, "confidence": confidence},
+            )
 
             if self._use_postgres:
-                self._insert_postgres(record)
+                self._insert_postgres(record, entry, event)
             self._records.append(record)
             if not self._use_postgres:
                 self._write_json()
+                self._emit_after_commit(entry, event)
             return record
+
+    def attach_alert(self, change_id: str, source_alert_id: str, metric: str, actor: str) -> ChangeRecord:
+        """Fold another alert into an existing change instead of opening a new one."""
+
+        def apply(record: ChangeRecord) -> ChangeRecord:
+            if source_alert_id in record.related_alerts:
+                return record
+            return record.model_copy(
+                update={
+                    "related_alerts": [*record.related_alerts, source_alert_id],
+                    "alert_count": record.alert_count + 1,
+                    "last_alert_at": datetime.now(timezone.utc),
+                }
+            )
+
+        return self._mutate(
+            change_id,
+            apply,
+            action="alert.correlated",
+            actor=actor,
+            details={"source_alert_id": source_alert_id, "metric": metric},
+        )
 
     def ensure_dev_executable(self, change_id: str) -> ChangeRecord:
         """Check a dev run is allowed BEFORE triggering a Jenkins build for it."""
@@ -217,7 +297,17 @@ class ChangeControlStore:
             )
             return updated.model_copy(update={"policy_reasons": self._evaluate_policy(updated)})
 
-        return self._mutate(change_id, apply)
+        return self._mutate(
+            change_id,
+            apply,
+            action="dev.recorded",
+            actor=executed_by,
+            details={
+                "jenkins_status": jenkins_status,
+                "validation_passed": validation_passed,
+                "execution_url": execution_url,
+            },
+        )
 
     def apply_decision(
         self,
@@ -257,7 +347,14 @@ class ChangeControlStore:
                 }
             )
 
-        return self._mutate(change_id, apply)
+        verb = "approved" if payload.decision == "approve" else "rejected"
+        return self._mutate(
+            change_id,
+            apply,
+            action=f"decision.{verb}",
+            actor=decided_by,
+            details={"comment": payload.comment},
+        )
 
     def begin_promotion(self, change_id: str, payload: PromoteRequest, promoted_by: str) -> ChangeRecord:
         """Validate and reserve a promotion BEFORE any deploy is triggered.
@@ -297,7 +394,13 @@ class ChangeControlStore:
                 }
             )
 
-        return self._mutate(change_id, apply)
+        return self._mutate(
+            change_id,
+            apply,
+            action="promotion.reserved",
+            actor=promoted_by,
+            details={"comment": payload.comment},
+        )
 
     def finalize_promotion(
         self,
@@ -305,6 +408,7 @@ class ChangeControlStore:
         promotion_result: str,
         prod_deploy_url: str,
         note: str = "",
+        actor: str = "system",
     ) -> ChangeRecord:
         """Apply the outcome of the prod deploy.
 
@@ -334,7 +438,13 @@ class ChangeControlStore:
                 update["deployment_state"] = "prod_promotion_failed"
             return record.model_copy(update=update)
 
-        return self._mutate(change_id, apply)
+        return self._mutate(
+            change_id,
+            apply,
+            action=f"promotion.{promotion_result}",
+            actor=actor,
+            details={"prod_deploy_url": prod_deploy_url, "note": note},
+        )
 
     def record_pr_preparation(
         self,
@@ -392,7 +502,17 @@ class ChangeControlStore:
                 }
             )
 
-        return self._mutate(change_id, apply)
+        return self._mutate(
+            change_id,
+            apply,
+            action="pr.prepared",
+            actor=generated_by,
+            details={
+                "pr_branch": pr_branch,
+                "code_change_status": code_change_status,
+                "test_evidence_status": test_evidence_status,
+            },
+        )
 
     # ------------------------------------------------------- mutation plumbing
 
@@ -416,11 +536,19 @@ class ChangeControlStore:
                 return idx, record
         return -1, None
 
-    def _mutate(self, change_id: str, apply: Callable[[ChangeRecord], ChangeRecord]) -> ChangeRecord:
+    def _mutate(
+        self,
+        change_id: str,
+        apply: Callable[[ChangeRecord], ChangeRecord],
+        action: str,
+        actor: str,
+        details: dict | None = None,
+    ) -> ChangeRecord:
         """Read-modify-write one record under the lock, bumping its version.
 
-        With Postgres the write is conditional on the version we read, so a
-        concurrent writer in another process causes a retry instead of a lost update.
+        The new state must be a legal lifecycle transition. With Postgres the
+        write is conditional on the version we read, so a concurrent writer in
+        another process causes a retry instead of a lost update.
         """
         with self._lock:
             for _ in range(self._MAX_WRITE_ATTEMPTS):
@@ -429,8 +557,10 @@ class ChangeControlStore:
                     raise ValueError("Change not found")
 
                 updated = apply(current).model_copy(update={"version": current.version + 1})
+                assert_transition(current.deployment_state, updated.deployment_state)
+                entry, event = self._emission(action, actor, current, updated, details)
                 try:
-                    self._save(idx, updated, expected_version=current.version)
+                    self._save(idx, updated, current.version, entry, event)
                 except ConcurrentModificationError:
                     continue
                 return updated
@@ -438,12 +568,65 @@ class ChangeControlStore:
                 f"Change {change_id} was modified concurrently; retry the request"
             )
 
-    def _save(self, idx: int, updated: ChangeRecord, expected_version: int) -> None:
+    def _emission(
+        self,
+        action: str,
+        actor: str,
+        before: ChangeRecord | None,
+        after: ChangeRecord,
+        details: dict | None,
+    ) -> tuple[AuditEntry, Event]:
+        from_state = before.deployment_state if before else None
+        entry = new_audit_entry(
+            actor=actor,
+            action=action,
+            entity_id=after.change_id,
+            from_state=from_state,
+            to_state=after.deployment_state,
+            details=details,
+        )
+        event = make_event(
+            INCIDENT_EVENTS_TOPIC,
+            after.service,
+            {
+                "change_id": after.change_id,
+                "incident_id": after.incident_id,
+                "action": action,
+                "actor": actor,
+                "from_state": from_state,
+                "to_state": after.deployment_state,
+                "status": after.status,
+                "version": after.version,
+            },
+        )
+        return entry, event
+
+    def _save(
+        self,
+        idx: int,
+        updated: ChangeRecord,
+        expected_version: int,
+        entry: AuditEntry,
+        event: Event,
+    ) -> None:
         if self._use_postgres:
-            self._update_postgres(updated, expected_version)
+            self._update_postgres(updated, expected_version, entry, event)
         self._records[idx] = updated
         if not self._use_postgres:
             self._write_json()
+            self._emit_after_commit(entry, event)
+
+    def _emit_after_commit(self, entry: AuditEntry, event: Event) -> None:
+        if self.audit is not None:
+            try:
+                self.audit.append(entry)
+            except Exception:
+                logger.exception("audit-append-failed", extra={"entity_id": entry.entity_id, "action": entry.action})
+        if self.bus is not None:
+            try:
+                self.bus.publish(event)
+            except Exception:
+                logger.exception("event-publish-failed", extra={"entity_id": entry.entity_id, "action": entry.action})
 
     # ------------------------------------------------------------------- JSON
 
@@ -492,7 +675,7 @@ class ChangeControlStore:
         row = self._pg(work)
         return self._record_from_row(row[0], row[1]) if row else None
 
-    def _insert_postgres(self, record: ChangeRecord) -> None:
+    def _insert_postgres(self, record: ChangeRecord, entry: AuditEntry, event: Event) -> None:
         def work(cur):
             cur.execute(
                 """
@@ -506,10 +689,18 @@ class ChangeControlStore:
                     record.version,
                 ),
             )
+            pg_insert_audit(cur, entry)
+            pg_insert_event(cur, event)
 
         self._pg(work)
 
-    def _update_postgres(self, record: ChangeRecord, expected_version: int) -> None:
+    def _update_postgres(
+        self,
+        record: ChangeRecord,
+        expected_version: int,
+        entry: AuditEntry,
+        event: Event,
+    ) -> None:
         def work(cur):
             cur.execute(
                 """
@@ -524,16 +715,13 @@ class ChangeControlStore:
                     expected_version,
                 ),
             )
-            return cur.rowcount
+            if cur.rowcount != 1:
+                # Raising here rolls the transaction back before any audit/event row is written.
+                raise ConcurrentModificationError(record.change_id)
+            pg_insert_audit(cur, entry)
+            pg_insert_event(cur, event)
 
-        if self._pg(work) != 1:
-            raise ConcurrentModificationError(record.change_id)
+        self._pg(work)
 
     def _pg_connect(self):
-        if not self.database_url:
-            raise ValueError("STORAGE_BACKEND=postgres requires DATABASE_URL")
-        try:
-            import psycopg
-        except Exception as exc:  # pragma: no cover - import guard
-            raise ValueError("Postgres backend requires 'psycopg' package") from exc
-        return psycopg.connect(self.database_url)
+        return pg_connect(self.database_url)

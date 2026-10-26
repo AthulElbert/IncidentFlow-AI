@@ -77,6 +77,45 @@ def test_happy_path_promotes_only_after_jenkins_confirms_success(make_app, monke
     assert len(deploys) == 1
 
 
+def test_audit_trail_records_who_did_each_step(make_app):
+    _, client = make_app()
+    change_id = _ready_and_approved(client)
+    assert client.post(f"/v1/changes/{change_id}/promote", headers=RELEASE, json={"comment": "ship"}).status_code == 200
+
+    response = client.get(f"/v1/changes/{change_id}/audit", headers=VIEWER)
+
+    assert response.status_code == 200
+    trail = response.json()
+    assert [(e["action"], e["actor"]) for e in trail] == [
+        ("change.created", "pipeline"),
+        ("dev.recorded", "approver-user"),
+        ("decision.approved", "approver-user"),
+        ("promotion.reserved", "release-operator-user"),
+        ("promotion.success", "release-operator-user"),
+    ]
+    assert trail[-1]["from_state"] == "promoting" and trail[-1]["to_state"] == "promoted_to_prod"
+
+    recent = client.get("/v1/audit?limit=2", headers=VIEWER).json()
+    assert [e["action"] for e in recent] == ["promotion.reserved", "promotion.success"]
+
+
+def test_a_refused_promotion_leaves_no_audit_entry(make_app):
+    _, client = make_app()
+    change_id = _new_change(client)
+
+    assert client.post(f"/v1/changes/{change_id}/promote", headers=RELEASE, json={}).status_code == 400
+
+    actions = [e["action"] for e in client.get(f"/v1/changes/{change_id}/audit", headers=VIEWER).json()]
+    assert actions == ["change.created"]
+
+
+def test_audit_endpoints_require_a_known_change_and_a_key(make_app):
+    _, client = make_app()
+
+    assert client.get("/v1/changes/CHG-NOPE/audit", headers=VIEWER).status_code == 404
+    assert client.get("/v1/audit").status_code == 401
+
+
 def test_unapproved_change_never_triggers_a_prod_deploy(make_app, monkeypatch):
     main_module, client = make_app()
     deploys = _count_prod_deploys(monkeypatch, main_module)

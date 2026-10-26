@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from app.adapters.apm_alert_source import APMAlertSource
+from app.services.correlation import AlertCorrelator
 from app.services.pipeline import SupportAgentPipeline
 from app.storage import atomic_write_text
 
@@ -45,6 +46,7 @@ class SchedulerStats:
     alerts_seen: int = 0
     alerts_processed: int = 0
     alerts_skipped_dedup: int = 0
+    alerts_correlated: int = 0
     alerts_failed: int = 0
     last_run_at: str = ""
     last_error: str = ""
@@ -63,10 +65,12 @@ class IncidentScheduler:
         pipeline: SupportAgentPipeline,
         dedup_store: AlertDedupStore,
         poll_interval_seconds: int = 30,
+        correlator: AlertCorrelator | None = None,
     ) -> None:
         self.alert_source = alert_source
         self.pipeline = pipeline
         self.dedup_store = dedup_store
+        self.correlator = correlator
         self.poll_interval_seconds = max(5, poll_interval_seconds)
 
         self._stop_event = threading.Event()
@@ -119,6 +123,12 @@ class IncidentScheduler:
                         stats["alerts_skipped_dedup"] = int(stats.get("alerts_skipped_dedup", 0)) + 1
                         continue
                     try:
+                        if self.correlator is not None:
+                            related_change = self.correlator.correlate(alert)
+                            if related_change:
+                                self.dedup_store.add(alert.source_alert_id)
+                                stats["alerts_correlated"] = int(stats.get("alerts_correlated", 0)) + 1
+                                continue
                         response = self.pipeline.process_event(alert.event)
                         if not response.metadata.get("change_id"):
                             raise ValueError("pipeline response missing change_id")

@@ -112,6 +112,16 @@ class ChangeRecord(BaseModel):
     status: Literal["pending_approval", "approved", "rejected"] = "pending_approval"
     deployment_state: Literal[
         "awaiting_dev_execution",
+        # Agent workflow and post-deploy states; see app/services/lifecycle.py.
+        "investigating",
+        "hypothesis_ready",
+        "fixing",
+        "verifying",
+        "reviewing",
+        "escalated",
+        "monitoring",
+        "resolved",
+        "rolled_back",
         "dev_fix_in_progress",
         "ready_for_prod",
         "blocked_by_policy",
@@ -123,6 +133,9 @@ class ChangeRecord(BaseModel):
     ] = "awaiting_dev_execution"
     policy_reasons: list[str] = Field(default_factory=list)
     created_at: datetime
+    related_alerts: list[str] = Field(default_factory=list)
+    alert_count: int = 1
+    last_alert_at: datetime | None = None
     decided_at: datetime | None = None
     decided_by: str | None = None
     decision_comment: str | None = None

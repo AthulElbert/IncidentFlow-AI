@@ -155,6 +155,8 @@ Open:
 - `POST /v1/scheduler/run-once`
 - `GET /v1/changes`
 - `GET /v1/changes/{change_id}`
+- `GET /v1/changes/{change_id}/audit` (who did what to this change, oldest first)
+- `GET /v1/audit` (most recent audit entries across all changes)
 - `GET /v1/metrics/summary`
 - `POST /v1/changes/{change_id}/prepare-pr`
 - `POST /v1/changes/{change_id}/execute-dev`
@@ -293,6 +295,9 @@ $env:PYTHONPATH = "C:\Personal_projects\Agentic_AI_Projects\src"
 - Promotion is validated and reserved (`promoting`) before any Jenkins call; a still-running deploy is never recorded as promoted
 - Failed Jira/Jenkins calls are recorded as failed (no simulated tickets or builds) and block the change from production
 - Writes are versioned per record (Postgres) and atomic (JSON)
+- Every state change is recorded in an append-only audit log (JSONL file, or a Postgres table that rejects UPDATE/DELETE) with the real actor and the before/after state; with Postgres the audit row and an `incident.events` outbox event are written in the same transaction as the change
+- State changes must follow the lifecycle table in `src/app/services/lifecycle.py`; anything else is refused
+- Related alerts (same service + environment, within `CORRELATION_WINDOW_MINUTES`) are folded into one open change instead of opening one per alert
 - Policy gate before `ready_for_prod`
 - Role-protected production promotion
 - Structured audit fields in change records

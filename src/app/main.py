@@ -8,7 +8,10 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
 
 from app.adapters.jenkins_client import wait_for_build
+from app.audit import AuditEntry, JsonlAuditLog, PostgresAuditLog
 from app.config import load_settings, validate_settings
+from app.events.inprocess import InProcessBus
+from app.events.postgres import PostgresBus
 from app.logging_config import setup_logging
 from app.models.schemas import (
     APMEvent,
@@ -28,6 +31,7 @@ from app.security import AuthManager, Principal
 from app.services.build_tracker import BuildTracker, promotion_result_for_status
 from app.services.change_control import ChangeControlStore, ConcurrentModificationError, PolicyConfig
 from app.services.code_fix_agent import CodeFixAgent
+from app.services.correlation import AlertCorrelator
 from app.services.dev_fix_executor import DevFixExecutor
 from app.services.integration_factory import (
     build_apm_alert_source,
@@ -55,6 +59,12 @@ logger = logging.getLogger("app.main")
 data_dir = base_dir / settings.data_dir
 kb_path = str(data_dir / "incident_history.json")
 change_path = str(data_dir / "change_records.json")
+if settings.storage_backend == "postgres":
+    audit_log = PostgresAuditLog(settings.database_url)
+    event_bus = PostgresBus(settings.database_url)
+else:
+    audit_log = JsonlAuditLog(data_dir / "audit_log.jsonl")
+    event_bus = InProcessBus()
 change_store = ChangeControlStore(
     change_path,
     policy=PolicyConfig(
@@ -67,6 +77,8 @@ change_store = ChangeControlStore(
     ),
     storage_backend=settings.storage_backend,
     database_url=settings.database_url,
+    audit=audit_log,
+    bus=event_bus,
 )
 
 jira_client, jira_mode = build_jira_client(settings)
@@ -136,6 +148,11 @@ scheduler = IncidentScheduler(
     pipeline=pipeline,
     dedup_store=alert_dedup_store,
     poll_interval_seconds=settings.apm_poll_interval_seconds,
+    correlator=AlertCorrelator(
+        change_store,
+        window_minutes=settings.correlation_window_minutes,
+        actor=settings.scheduler_actor,
+    ),
 )
 
 auth = AuthManager(
@@ -305,6 +322,29 @@ def get_metrics_summary(principal: Principal = Depends(viewer_auth)) -> MetricsS
         changes=changes,
         min_confidence_for_prod=settings.min_confidence_for_prod,
     )
+
+
+@app.get("/v1/audit", response_model=list[AuditEntry])
+def list_audit(
+    limit: int = Query(default=100, ge=1, le=1000),
+    principal: Principal = Depends(viewer_auth),
+) -> list[AuditEntry]:
+    """Most recent audit entries across all changes, oldest first."""
+    _ = principal
+    return audit_log.list(limit=limit)
+
+
+@app.get("/v1/changes/{change_id}/audit", response_model=list[AuditEntry])
+def get_change_audit(
+    change_id: str,
+    limit: int = Query(default=200, ge=1, le=1000),
+    principal: Principal = Depends(viewer_auth),
+) -> list[AuditEntry]:
+    """Everything that happened to one change, oldest first."""
+    _ = principal
+    if not change_store.get_change(change_id):
+        raise HTTPException(status_code=404, detail="Change not found")
+    return audit_log.list(entity_id=change_id, limit=limit)
 
 
 @app.get("/v1/changes/{change_id}", response_model=ChangeRecord)
@@ -480,7 +520,9 @@ def promote_change(
     try:
         prod_build = jenkins_client.trigger_prod_deploy(service=reserved.service, change_id=change_id)
     except Exception as exc:
-        change_store.finalize_promotion(change_id, "failed", "", note=f"deploy trigger failed: {exc}")
+        change_store.finalize_promotion(
+            change_id, "failed", "", note=f"deploy trigger failed: {exc}", actor=principal.actor
+        )
         raise HTTPException(status_code=502, detail=f"Failed to trigger Jenkins prod deploy: {exc}") from exc
 
     # 3. Give the build a bounded chance to finish. If polling itself fails or the build is
@@ -500,6 +542,7 @@ def promote_change(
         change_id,
         promotion_result_for_status(prod_build.status),
         prod_build.url,
+        actor=principal.actor,
     )
 
     return PromoteResponse(

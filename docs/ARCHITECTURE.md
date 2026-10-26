@@ -1,6 +1,11 @@
 # IncidentFlow-AI: Target Architecture
 
-Status: design, not yet implemented. Describes where the project is going; the current code is described in `README.md` and `next/README.md`.
+Status: design. Phase 0 (safety and test foundation) and Phase 1 (audit log, event bus, lifecycle guard, alert correlation) are implemented; the agent workflow (Phases 2 to 7) is not. The current code is described in `README.md` and `next/README.md`.
+
+Implementation notes since this was written:
+- `awaiting_approval` was dropped as a state. A change is awaiting approval when it is `ready_for_prod` with status `pending_approval`; the reviewing step moves to `ready_for_prod`.
+- The allowed transitions live in `src/app/services/lifecycle.py` and are enforced for every write.
+- `EventBus` is pull-based with per-group offset commits (`poll`/`commit`), implemented by `InProcessBus` and `PostgresBus` (transactional outbox). Nothing consumes the events yet.
 
 ## 1. Scope and decisions
 
@@ -111,10 +116,11 @@ Owns the incident/change lifecycle (section 5), the policy gate, approval and pr
 ## 5. Lifecycle
 
 ```
-received -> investigating -> hypothesis_ready -> fixing -> verifying -> reviewing
-         -> awaiting_approval -> approved -> promoting -> monitoring -> resolved
+awaiting_dev_execution -> investigating -> hypothesis_ready -> fixing -> verifying -> reviewing
+         -> ready_for_prod (awaiting human approval) -> promoting -> promoted_to_prod -> monitoring -> resolved
 ```
-Exits: `escalated` (any agent gives up or confidence too low), `rejected` (human says no), `rolled_back` (canary failed), `promotion_failed`.
+(`awaiting_dev_execution` is the entry state today, standing in for `received`. Approval is the separate `status` field: `pending_approval` -> `approved`/`rejected`.)
+Exits: `escalated` (any agent gives up or confidence too low), `closed_rejected` (human says no), `rolled_back` (canary failed), `prod_promotion_failed`.
 
 | From | To | Triggered by | Guard |
 |---|---|---|---|
@@ -122,13 +128,13 @@ Exits: `escalated` (any agent gives up or confidence too low), `rejected` (human
 | investigating | hypothesis_ready / escalated | Investigator | evidence confidence >= threshold else escalate |
 | fixing | verifying | Fixer | diff within allowed paths and line limit |
 | verifying | reviewing / fixing / escalated | Verifier | pass; fail and attempts < 3; fail and attempts = 3 |
-| reviewing | awaiting_approval / fixing / escalated | Critic | |
-| awaiting_approval | approved / rejected | human approver | role approver; actor != fixer run initiator |
-| approved | promoting | human release operator | actor != approver; policy gate; reservation succeeds |
+| reviewing | ready_for_prod / fixing / escalated | Critic | `ready_for_prod` + status `pending_approval` = awaiting approval |
+| ready_for_prod (pending) | ready_for_prod (approved) / blocked_by_policy / closed_rejected | human approver | role approver; policy gate |
+| ready_for_prod (approved) | promoting | human release operator | actor != approver; policy gate; reservation succeeds |
 | promoting | monitoring / promotion_failed | Jenkins `SUCCESS` / failure | confirmed status only |
 | monitoring | resolved / rolled_back | canary window | metric within bound else rollback |
 
-The `deployment_state` Literal in `schemas.py` gains `investigating`, `fixing`, `verifying`, `reviewing`, `awaiting_approval`, `promoting`, `monitoring`, `escalated`, `rolled_back`.
+The `deployment_state` Literal in `schemas.py` already includes `investigating`, `hypothesis_ready`, `fixing`, `verifying`, `reviewing`, `escalated`, `promoting`, `monitoring`, `resolved`, `rolled_back`.
 
 ## 6. Agent graph
 
@@ -149,7 +155,7 @@ g.add_conditional_edges("verify", route_verification,
     {"pass": "review", "retry": "fix", "give_up": "escalate"})
 g.add_conditional_edges("review", route_review,
     {"ok": "package", "send_back": "fix", "block": "escalate"})
-g.add_edge("package", END)    # hands off to governance: awaiting_approval
+g.add_edge("package", END)    # hands off to governance: ready_for_prod, pending approval
 ```
 
 `IncidentState` carries: incident, evidence refs, hypotheses, fix proposal, verification reports (all attempts), review, attempt counter, token/tool budgets, warnings. Retries feed the Verifier's failure evidence back into the Fixer's next prompt.
@@ -163,7 +169,7 @@ The graph ends at `package`. Approval and promotion happen outside the graph, in
 3. **Fix:** worktree edit, scoped and size-limited.
 4. **Verify:** run tests, deploy to dev, compare incident metric before/after, replay load. Failures loop back (max 3).
 5. **Review:** Critic checks diff, blast radius, and that evidence supports the claim.
-6. **Package:** draft PR, Jira ticket, evidence bundle, timeline. State becomes `awaiting_approval`.
+6. **Package:** draft PR, Jira ticket, evidence bundle, timeline. State becomes `ready_for_prod` with status `pending_approval`.
 7. A human approves (governance layer re-runs the policy gate). A different human promotes.
 8. Governance reserves the promotion, triggers Jenkins, polls until `SUCCESS`, then monitors the canary window; failure rolls back and reopens the incident.
 9. On resolution, outcome + evidence are embedded into incident memory and a postmortem draft is generated.

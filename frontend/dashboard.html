@@ -563,6 +563,10 @@
       if (c.deployment_state === "promoted_to_prod") return { index: 7, state: "done" };
       if (c.deployment_state === "prod_promotion_failed") return { index: 7, state: "failed" };
       if (c.deployment_state === "promoting") return { index: 6, state: "active" };
+      if (["investigating", "hypothesis_ready", "fixing", "verifying", "reviewing"].includes(c.deployment_state)) return { index: 1, state: "active" };
+      if (c.deployment_state === "escalated") return { index: 1, state: "blocked" };
+      if (["monitoring", "resolved"].includes(c.deployment_state)) return { index: 7, state: "done" };
+      if (c.deployment_state === "rolled_back") return { index: 7, state: "failed" };
       if (c.deployment_state === "dev_fix_in_progress") return { index: 4, state: "active" };
       if (c.status === "approved" && c.deployment_state === "ready_for_prod") return { index: 7, state: "active" };
       if (c.deployment_state === "closed_rejected") return { index: 6, state: "rejected" };
@@ -648,10 +652,33 @@
       `;
     }
 
+    async function auditTrailHtml(changeId) {
+      try {
+        const trail = await api(`/v1/changes/${encodeURIComponent(changeId)}/audit`, { role: "viewer" });
+        if (!trail.length) return "";
+        const rows = trail.map((e) => {
+          const when = new Date(e.occurred_at).toLocaleTimeString();
+          const move = e.from_state && e.from_state !== e.to_state ? ` (${escapeHtml(e.from_state)} → ${escapeHtml(e.to_state)})` : "";
+          return `<li>${escapeHtml(when)} · <strong>${escapeHtml(e.actor)}</strong> · ${escapeHtml(e.action)}${move}</li>`;
+        }).join("");
+        return `
+          <div style="margin-top:10px;">
+            <span class="k" style="font-size:0.85rem;">Audit trail:</span>
+            <ul class="policy-list" style="list-style:none;padding-left:0;">${rows}</ul>
+          </div>`;
+      } catch (err) {
+        return "";
+      }
+    }
+
     async function loadChangeDetail(changeId) {
       try {
         const c = await api(`/v1/changes/${encodeURIComponent(changeId)}`, { role: "viewer" });
         renderStepper(c);
+        const auditHtml = await auditTrailHtml(changeId);
+        const correlatedHtml = c.alert_count > 1
+          ? `<div><span class="k">Correlated alerts:</span> ${c.alert_count} (${c.related_alerts.map(escapeHtml).join(", ")})</div>`
+          : "";
 
         const policyHtml = (c.policy_reasons && c.policy_reasons.length)
           ? `<ul class="policy-list">${c.policy_reasons.map((r) => `<li>${escapeHtml(r)}</li>`).join("")}</ul>`
@@ -668,9 +695,11 @@
             <div><span class="k">Dev execution:</span> ${escapeHtml(c.dev_execution_status)} ${c.dev_apm_improvement_pct != null ? `(APM +${c.dev_apm_improvement_pct}%)` : ""}</div>
             <div><span class="k">Decision:</span> ${escapeHtml(c.status)} ${c.decided_by ? `by ${escapeHtml(c.decided_by)}` : ""}</div>
             <div><span class="k">Deployment state:</span> ${escapeHtml(c.deployment_state)}</div>
+            ${correlatedHtml}
           </div>
           <div style="margin-top:8px;"><span class="k" style="font-size:0.85rem;">Policy check:</span> ${policyHtml}</div>
           ${codeFixHtml(c)}
+          ${auditHtml}
         `;
 
         const patchEl = el("patchPreview");

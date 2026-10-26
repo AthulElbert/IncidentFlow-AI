@@ -122,6 +122,7 @@ class Settings:
     jenkins_poll_interval_seconds: float = 2.0
     mock_jenkins_outcome: str = "success"
     mock_jenkins_polls_until_done: int = 1
+    correlation_window_minutes: float = 15.0
 
 
 class ConfigError(ValueError):
@@ -251,4 +252,5 @@ def load_settings(base_dir: str | None = None) -> Settings:
         jenkins_poll_interval_seconds=_as_float(os.getenv("JENKINS_POLL_INTERVAL_SECONDS"), default=2.0),
         mock_jenkins_outcome=os.getenv("MOCK_JENKINS_OUTCOME", "success").strip().lower(),
         mock_jenkins_polls_until_done=_as_int(os.getenv("MOCK_JENKINS_POLLS"), default=1),
+        correlation_window_minutes=_as_float(os.getenv("CORRELATION_WINDOW_MINUTES"), default=15.0),
     )

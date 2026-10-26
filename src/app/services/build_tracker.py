@@ -36,12 +36,12 @@ class BuildTracker:
             raise ValueError("Change not found")
 
         if record.deployment_state == "promoting":
-            return self._refresh_promotion(record)
+            return self._refresh_promotion(record, actor)
         if record.deployment_state == "dev_fix_in_progress":
             return self._refresh_dev(record, actor)
         raise ValueError("No build in progress for this change")
 
-    def _refresh_promotion(self, record: ChangeRecord) -> ChangeRecord:
+    def _refresh_promotion(self, record: ChangeRecord, actor: str) -> ChangeRecord:
         if not record.prod_deploy_url:
             raise ValueError("No prod deploy build to refresh")
         build: JenkinsBuildResult = self.jenkins.get_build_status(record.prod_deploy_url)
@@ -49,6 +49,7 @@ class BuildTracker:
             change_id=record.change_id,
             promotion_result=promotion_result_for_status(build.status),
             prod_deploy_url=build.url,
+            actor=actor,
         )
 
     def _refresh_dev(self, record: ChangeRecord, actor: str) -> ChangeRecord:
