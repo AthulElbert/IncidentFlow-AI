@@ -323,6 +323,47 @@ def test_worktree_provider_opens_an_isolated_checkout_on_a_new_branch(tmp_path):
     assert "agent/chg-1-payments" in branches.stdout
 
 
+def _commit_repo(repo, files):
+    for rel, text in files.items():
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    _git(repo, "init", "-q")
+    _git(repo, "add", ".")
+    _git(repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "init")
+
+
+def test_a_worktree_for_the_same_branch_can_be_opened_again_and_starts_clean(tmp_path):
+    repo = tmp_path / "project"
+    _commit_repo(repo, {"config/app.yaml": "timeout_ms: 800\n"})
+    provider = GitWorktreeProvider(repo, allowed_edit_paths=["config"], max_edit_lines=20)
+
+    first = provider.open("agent-fix/chg-1-svc")
+    first.edit("config/app.yaml", "timeout_ms: 1\n")
+    second = provider.open("agent-fix/chg-1-svc")  # e.g. the same change run again after an escalation
+
+    assert second.root == first.root
+    assert second.diff() == ""
+    assert (second.root / "config" / "app.yaml").read_text(encoding="utf-8") == "timeout_ms: 800\n"
+
+
+def test_opening_a_worktree_never_resets_another_branch_that_holds_commits(tmp_path):
+    repo = tmp_path / "project"
+    _commit_repo(repo, {"config/app.yaml": "a: 1\n"})
+    _git(repo, "branch", "agent/chg-1-svc")
+    other = repo / ".agent_worktrees" / "agent-chg-1-svc"
+    _git(repo, "worktree", "add", str(other), "agent/chg-1-svc")
+    (other / "config" / "app.yaml").write_text("a: pr flow work\n", encoding="utf-8")
+    _git(other, "add", "-A")
+    _git(other, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "work from the PR flow")
+
+    GitWorktreeProvider(repo, allowed_edit_paths=["config"]).open("agent-fix/chg-1-svc")
+
+    log = subprocess.run(["git", "log", "--format=%s", "agent/chg-1-svc"], cwd=repo, capture_output=True, text=True).stdout
+    assert "work from the PR flow" in log
+    assert (other / "config" / "app.yaml").read_text(encoding="utf-8") == "a: pr flow work\n"
+
+
 def test_worktree_provider_reports_git_failures(tmp_path):
     not_a_repo = tmp_path / "plain"
     not_a_repo.mkdir()

@@ -10,6 +10,11 @@ NON_TERMINAL_BUILD_STATES = frozenset({"QUEUED", "RUNNING", "IN_PROGRESS"})
 UNSAFE_BUILD_STATES_FOR_PROD = NON_TERMINAL_BUILD_STATES | {"UNKNOWN"}
 
 
+# What the pipeline records as an incident's resolution when nothing is known. Such a record has not
+# been resolved by anyone, so it must never be offered as evidence about how to resolve another one.
+UNRESOLVED_RESOLUTION = "No known resolution. Apply suggested runbook actions in dev and validate."
+
+
 def is_non_terminal_build_status(status: str | None) -> bool:
     return (status or "").upper() in NON_TERMINAL_BUILD_STATES
 
@@ -136,6 +141,11 @@ class ChangeRecord(BaseModel):
     related_alerts: list[str] = Field(default_factory=list)
     alert_count: int = 1
     last_alert_at: datetime | None = None
+    # The alert that opened this change, so the agents can investigate it later.
+    alert: dict[str, Any] | None = None
+    agent_run_status: Literal["not_started", "running", "ready_for_approval", "escalated"] = "not_started"
+    # Compact, durable record of the latest agent run: reports, attempts, escalation reason.
+    agent_run: dict[str, Any] = Field(default_factory=dict)
     decided_at: datetime | None = None
     decided_by: str | None = None
     decision_comment: str | None = None

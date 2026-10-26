@@ -220,7 +220,7 @@ class Investigator:
                 return {"new_evidence": [_evidence_for_prompt(e) for e in new], "deploys_returned": len(deploys)}
             if (tool, method) == ("memory", "search"):
                 text = clean_text(str(args.get("text", "")), 300)
-                results = tools.memory.search(text, service=service, k=3)
+                results = tools.memory.search(text, service=service, k=3, exclude_ids=[ctx.incident_id])
                 new = ledger.add_similar(results, source="memory.search")
                 return {"new_evidence": [_evidence_for_prompt(e) for e in new], "matches": len(results)}
         except ToolError as exc:

@@ -149,6 +149,9 @@ class Settings:
     fixer_max_steps: int = 12
     critic_mode: str = "rules"
     critic_model: str = ""
+    agent_run_mode: str = "off"
+    agent_max_fix_attempts: int = 3
+    agent_run_workers: int = 2
 
 
 _TOOL_MODES = {
@@ -160,6 +163,7 @@ _TOOL_MODES = {
     "DEV_METRICS_MODE": ("dev_metrics_mode", {"mock", "prometheus"}),
     "FIXER_MODE": ("fixer_mode", {"off", "llm"}),
     "CRITIC_MODE": ("critic_mode", {"rules", "llm"}),
+    "AGENT_RUN_MODE": ("agent_run_mode", {"off", "manual", "auto"}),
     "MOCK_DEV_EFFECT": ("mock_dev_effect", {"resolves", "no_effect", "partial", "regresses_other", "deploy_fails"}),
 }
 
@@ -194,6 +198,10 @@ def validate_settings(settings: "Settings") -> None:
     for env_name, active in (("FIXER_MODE", settings.fixer_mode == "llm"), ("CRITIC_MODE", settings.critic_mode == "llm")):
         if active and not settings.llm_api_key:
             errors.append(f"{env_name}=llm requires LLM_API_KEY")
+    if not 1 <= settings.agent_max_fix_attempts <= 5:
+        errors.append("AGENT_MAX_FIX_ATTEMPTS must be between 1 and 5")
+    if not 1 <= settings.agent_run_workers <= 8:
+        errors.append("AGENT_RUN_WORKERS must be between 1 and 8")
     if not 1 <= settings.fixer_max_steps <= 50:
         errors.append("FIXER_MAX_STEPS must be between 1 and 50")
     if settings.dev_metrics_mode == "prometheus" and not settings.dev_metrics_base_url:
@@ -341,4 +349,7 @@ def load_settings(base_dir: str | None = None) -> Settings:
         fixer_max_steps=_as_int(os.getenv("FIXER_MAX_STEPS"), default=12),
         critic_mode=os.getenv("CRITIC_MODE", "rules").strip().lower(),
         critic_model=os.getenv("CRITIC_MODEL", "").strip(),
+        agent_run_mode=os.getenv("AGENT_RUN_MODE", "off").strip().lower(),
+        agent_max_fix_attempts=_as_int(os.getenv("AGENT_MAX_FIX_ATTEMPTS"), default=3),
+        agent_run_workers=_as_int(os.getenv("AGENT_RUN_WORKERS"), default=2),
     )

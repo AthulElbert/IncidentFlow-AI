@@ -77,6 +77,10 @@ def _collect(ctx: IncidentContext, tools: AgentTools, ledger: EvidenceLedger) ->
         for sample in item.data.get("samples", [])[:1]
     )
     query = f"{ctx.alert_metric} {ctx.alert_message} {error_samples}"
-    similar = _call(ledger, "memory.search", lambda: tools.memory.search(query, service=ctx.service, k=3))
+    similar = _call(
+        ledger,
+        "memory.search",
+        lambda: tools.memory.search(query, service=ctx.service, k=3, exclude_ids=[ctx.incident_id]),
+    )
     if similar is not None:
         ledger.add_similar(similar, source="memory.search")

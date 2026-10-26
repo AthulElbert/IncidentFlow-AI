@@ -179,6 +179,7 @@ class ChangeControlStore:
         jenkins_status: str,
         jira_sync_status: str = "synced",
         actor: str = "pipeline",
+        alert: dict | None = None,
     ) -> ChangeRecord:
         with self._lock:
             seed_record = ChangeRecord(
@@ -197,6 +198,7 @@ class ChangeControlStore:
                 confidence=confidence,
                 warning_count=warning_count,
                 jenkins_status=jenkins_status,
+                alert=alert,
                 created_at=datetime.now(timezone.utc),
             )
             reasons = self._evaluate_policy(seed_record)
@@ -250,6 +252,8 @@ class ChangeControlStore:
             raise ValueError("Change already promoted; dev execution not allowed")
         if record.deployment_state == "dev_fix_in_progress":
             raise ValueError("A dev build is already in progress; use refresh-status")
+        if record.agent_run_status == "running":
+            raise ValueError("An agent run is in progress for this change")
         return record
 
     def record_dev_execution(
@@ -266,36 +270,10 @@ class ChangeControlStore:
         """Record a dev run. validation_passed=None means the Jenkins build is still running."""
 
         def apply(record: ChangeRecord) -> ChangeRecord:
-            if record.status != "pending_approval":
-                raise ValueError("Change decision already finalized")
-
-            if record.deployment_state in _PROMOTION_TERMINAL_STATES | {"promoting"}:
-                raise ValueError("Change already promoted; dev execution not allowed")
-
-            if validation_passed is None:
-                dev_execution_status = "in_progress"
-                deployment_state = "dev_fix_in_progress"
-            elif validation_passed:
-                dev_execution_status = "passed"
-                deployment_state = "ready_for_prod"
-            else:
-                dev_execution_status = "failed"
-                deployment_state = "dev_fix_failed"
-
-            updated = record.model_copy(
-                update={
-                    "jenkins_status": jenkins_status,
-                    "dev_execution_status": dev_execution_status,
-                    "dev_execution_url": execution_url,
-                    "dev_apm_improvement_pct": apm_improvement_pct,
-                    "dev_smoke_tests_passed": smoke_tests_passed,
-                    "dev_notes": notes,
-                    "dev_executed_at": datetime.now(timezone.utc),
-                    "dev_executed_by": executed_by,
-                    "deployment_state": deployment_state,
-                }
+            return self._with_dev_execution(
+                record, executed_by, execution_url, jenkins_status, apm_improvement_pct,
+                smoke_tests_passed, validation_passed, notes,
             )
-            return updated.model_copy(update={"policy_reasons": self._evaluate_policy(updated)})
 
         return self._mutate(
             change_id,
@@ -308,6 +286,170 @@ class ChangeControlStore:
                 "execution_url": execution_url,
             },
         )
+
+    def _with_dev_execution(
+        self,
+        record: ChangeRecord,
+        executed_by: str,
+        execution_url: str,
+        jenkins_status: str,
+        apm_improvement_pct: float,
+        smoke_tests_passed: bool,
+        validation_passed: bool | None,
+        notes: str,
+    ) -> ChangeRecord:
+        if record.status != "pending_approval":
+            raise ValueError("Change decision already finalized")
+
+        if record.deployment_state in _PROMOTION_TERMINAL_STATES | {"promoting"}:
+            raise ValueError("Change already promoted; dev execution not allowed")
+
+        if validation_passed is None:
+            dev_execution_status = "in_progress"
+            deployment_state = "dev_fix_in_progress"
+        elif validation_passed:
+            dev_execution_status = "passed"
+            deployment_state = "ready_for_prod"
+        else:
+            dev_execution_status = "failed"
+            deployment_state = "dev_fix_failed"
+
+        updated = record.model_copy(
+            update={
+                "jenkins_status": jenkins_status,
+                "dev_execution_status": dev_execution_status,
+                "dev_execution_url": execution_url,
+                "dev_apm_improvement_pct": apm_improvement_pct,
+                "dev_smoke_tests_passed": smoke_tests_passed,
+                "dev_notes": notes,
+                "dev_executed_at": datetime.now(timezone.utc),
+                "dev_executed_by": executed_by,
+                "deployment_state": deployment_state,
+            }
+        )
+        return updated.model_copy(update={"policy_reasons": self._evaluate_policy(updated)})
+
+    # ---------------------------------------------------------- agent workflow
+
+    # States the orchestrator may move a change into while an agent run is in progress.
+    _AGENT_STATES = {"hypothesis_ready", "fixing", "verifying", "reviewing", "escalated"}
+
+    def begin_agent_run(self, change_id: str, actor: str) -> ChangeRecord:
+        """Reserve the change for one agent run. Refuses a second concurrent or finished run."""
+
+        def apply(record: ChangeRecord) -> ChangeRecord:
+            if record.agent_run_status == "running":
+                raise ValueError("An agent run is already in progress for this change")
+            if record.status != "pending_approval":
+                raise ValueError("Change decision already finalized")
+            if not record.alert:
+                raise ValueError("No alert was recorded for this change, so there is nothing to investigate")
+            if record.deployment_state not in {"awaiting_dev_execution", "escalated"}:
+                raise ValueError(f"Agents cannot start from state {record.deployment_state}")
+            runs = int(record.agent_run.get("run", 0)) + 1
+            return record.model_copy(
+                update={
+                    "deployment_state": "investigating",
+                    "agent_run_status": "running",
+                    "agent_run": {"run": runs, "started_at": datetime.now(timezone.utc).isoformat(), "attempts": []},
+                }
+            )
+
+        return self._mutate(change_id, apply, action="agent.started", actor=actor)
+
+    def record_agent_step(
+        self,
+        change_id: str,
+        actor: str,
+        to_state: str,
+        action: str,
+        run_patch: dict | None = None,
+        issue_type: str | None = None,
+        confidence: float | None = None,
+        escalation_reason: str = "",
+    ) -> ChangeRecord:
+        """Move a running agent workflow to its next state and record what the agent produced."""
+        if to_state not in self._AGENT_STATES:
+            raise ValueError(f"'{to_state}' is not a state an agent run may set")
+
+        def apply(record: ChangeRecord) -> ChangeRecord:
+            if record.agent_run_status != "running":
+                raise ValueError("No agent run is in progress for this change")
+            update: dict = {
+                "deployment_state": to_state,
+                "agent_run": {**record.agent_run, **(run_patch or {})},
+            }
+            if issue_type is not None:
+                update["issue_type"] = issue_type
+            if confidence is not None:
+                update["confidence"] = confidence
+            if to_state == "escalated":
+                update["agent_run_status"] = "escalated"
+                update["agent_run"]["escalation_reason"] = escalation_reason
+                update["agent_run"]["finished_at"] = datetime.now(timezone.utc).isoformat()
+            updated = record.model_copy(update=update)
+            return updated.model_copy(update={"policy_reasons": self._evaluate_policy(updated)})
+
+        return self._mutate(
+            change_id,
+            apply,
+            action=action,
+            actor=actor,
+            details={"to_state": to_state, **({"reason": escalation_reason} if escalation_reason else {})},
+        )
+
+    def finish_agent_run(
+        self,
+        change_id: str,
+        actor: str,
+        execution_url: str,
+        apm_improvement_pct: float,
+        notes: str,
+        run_patch: dict | None = None,
+    ) -> ChangeRecord:
+        """A verified, reviewed fix is ready for a human: record the evidence and open the approval gate.
+
+        This is the only place an agent run reaches `ready_for_prod`. It does not approve anything:
+        the change stays `pending_approval` and the policy gate runs again when a person approves.
+        """
+
+        def apply(record: ChangeRecord) -> ChangeRecord:
+            if record.agent_run_status != "running":
+                raise ValueError("No agent run is in progress for this change")
+            updated = self._with_dev_execution(
+                record, actor, execution_url, "SUCCESS", apm_improvement_pct, True, True, notes
+            )
+            return updated.model_copy(
+                update={
+                    "agent_run_status": "ready_for_approval",
+                    "agent_run": {
+                        **record.agent_run,
+                        **(run_patch or {}),
+                        "finished_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                }
+            )
+
+        return self._mutate(change_id, apply, action="agent.ready_for_approval", actor=actor)
+
+    def recover_interrupted_runs(self, actor: str = "system") -> list[str]:
+        """After a restart no run is still going: escalate any that were left `running`."""
+        recovered: list[str] = []
+        for record in self.list_changes():
+            if record.agent_run_status != "running":
+                continue
+            try:
+                self.record_agent_step(
+                    record.change_id,
+                    actor,
+                    "escalated",
+                    "agent.interrupted",
+                    escalation_reason="the agent run was interrupted by a restart; run it again",
+                )
+                recovered.append(record.change_id)
+            except ValueError:
+                continue
+        return recovered
 
     def apply_decision(
         self,

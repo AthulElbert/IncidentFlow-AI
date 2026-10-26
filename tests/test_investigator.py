@@ -8,6 +8,7 @@ from app.audit import JsonlAuditLog
 from app.replay import event_for, toolkit_for
 from app.tools.base import ToolBudgetExceeded, ToolError
 from app.tools.instrumentation import ToolBudget
+from app.tools.memory import LexicalIncidentMemory
 from app.tools.scenarios import (
     BAD_DEPLOY_ERROR_SPIKE,
     DEFAULT_SCENARIOS,
@@ -330,3 +331,25 @@ def test_the_investigator_never_gets_to_edit_or_deploy():
         budgeted = toolkit.for_agent("investigator", entity_id="INC-2", budget=ToolBudget(1))
         budgeted.memory.search("a")
         budgeted.memory.search("b")
+
+
+def test_an_incident_cannot_corroborate_itself_through_incident_memory():
+    """Regression: the pipeline files each new incident in memory before the agents run, so it used to find itself."""
+    from datetime import datetime, timezone
+
+    from app.models.schemas import UNRESOLVED_RESOLUTION, IncidentRecord
+
+    ctx = IncidentContext.from_event("INC-SELF", event_for(BAD_DEPLOY_ERROR_SPIKE))
+    own_record = IncidentRecord(
+        incident_id="INC-SELF", service=ctx.service, metric=ctx.alert_metric, issue_type="application_error",
+        summary="orders-service 5xx rate above 2% NullPointerException in checkout", resolution="Rolled back the deploy.",
+        created_at=datetime(2026, 7, 21, tzinfo=timezone.utc),
+    )
+    placeholder = own_record.model_copy(update={"incident_id": "INC-PLACEHOLDER", "resolution": UNRESOLVED_RESOLUTION})
+    toolkit = toolkit_for(DEFAULT_SCENARIOS, [])
+    toolkit.memory = LexicalIncidentMemory(lambda: [own_record, placeholder])
+
+    report = Investigator().investigate(ctx, toolkit.for_agent("investigator", entity_id="INC-SELF"))
+
+    assert not [e for e in report.evidence if e.kind == "similar_incident"]
+    assert report.top.confidence == pytest.approx(0.85)  # earned from metrics, logs and the deploy alone

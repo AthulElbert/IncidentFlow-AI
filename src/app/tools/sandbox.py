@@ -374,6 +374,10 @@ class GitWorktreeProvider:
             raise ToolError("branch name is required")
         path = self.repo_root / self.worktrees_dir / slug
         path.parent.mkdir(parents=True, exist_ok=True)
+        # A worktree left over from an earlier run of the same change is disposable by design. Git will
+        # not re-create a branch that a registered worktree still holds, so clear the stale one first.
+        for args in (["worktree", "remove", "--force", str(path)], ["worktree", "prune"]):
+            subprocess.run(["git", *args], cwd=str(self.repo_root), capture_output=True, text=True, timeout=45, check=False)
         proc = subprocess.run(
             ["git", "worktree", "add", "--force", "-B", branch, str(path)],
             cwd=str(self.repo_root),

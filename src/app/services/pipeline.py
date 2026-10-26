@@ -1,10 +1,18 @@
 ﻿import logging
 from datetime import datetime, timezone
+from typing import Callable
 from uuid import uuid4
 
 from app.adapters.jenkins_client import JenkinsClient
 from app.adapters.jira_client import JiraClient
-from app.models.schemas import APMEvent, IncidentRecord, IncidentResponse, JenkinsBuildResult, JiraTicket
+from app.models.schemas import (
+    UNRESOLVED_RESOLUTION,
+    APMEvent,
+    IncidentRecord,
+    IncidentResponse,
+    JenkinsBuildResult,
+    JiraTicket,
+)
 from app.services.change_control import ChangeControlStore
 from app.services.fix_planner import build_ticket_text, suggest_runbook_actions
 from app.services.knowledge_base import IncidentKnowledgeBase
@@ -33,6 +41,9 @@ class SupportAgentPipeline:
         self.jenkins_mode = jenkins_mode
         self.change_store = change_store
         self.triage_agent = triage_agent
+        # Called with the new change id once it exists (used to start an agent run). Never allowed
+        # to break incident intake.
+        self.on_change_created: Callable[[str], None] | None = None
         self.patterns = PatternDetector()
         self.kb = IncidentKnowledgeBase(
             kb_file,
@@ -111,7 +122,7 @@ class SupportAgentPipeline:
             resolution=(
                 similar[0].resolution
                 if similar
-                else "No known resolution. Apply suggested runbook actions in dev and validate."
+                else UNRESOLVED_RESOLUTION
             ),
             runbook_actions=suggestions,
             created_at=datetime.now(timezone.utc),
@@ -133,7 +144,14 @@ class SupportAgentPipeline:
             confidence=confidence,
             warning_count=len(warnings),
             jenkins_status=jenkins_result.status,
+            alert=event.model_dump(mode="json"),
         )
+
+        if self.on_change_created is not None:
+            try:
+                self.on_change_created(change.change_id)
+            except Exception:
+                logger.exception("on-change-created-failed", extra={"change_id": change.change_id})
 
         logger.info(
             "incident-processed",

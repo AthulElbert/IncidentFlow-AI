@@ -3,7 +3,7 @@ import re
 from collections import Counter
 from typing import Callable, Protocol
 
-from app.models.schemas import IncidentRecord
+from app.models.schemas import UNRESOLVED_RESOLUTION, IncidentRecord
 from app.tools.models import ScoredIncident
 
 _STOPWORDS = frozenset(
@@ -15,8 +15,13 @@ _MIN_SCORE = 0.08
 
 
 class IncidentMemory(Protocol):
-    def search(self, text: str, service: str | None = None, k: int = 3) -> list[ScoredIncident]:
-        """Past incidents most relevant to `text`, best first, each with the evidence for the match."""
+    def search(
+        self, text: str, service: str | None = None, k: int = 3, exclude_ids: list[str] | None = None
+    ) -> list[ScoredIncident]:
+        """Resolved past incidents most relevant to `text`, best first, each with why it matched.
+
+        `exclude_ids` keeps the incident being investigated out of its own evidence.
+        """
         ...
 
 
@@ -42,8 +47,13 @@ class LexicalIncidentMemory:
     def __init__(self, records: Callable[[], list[IncidentRecord]]) -> None:
         self._records = records
 
-    def search(self, text: str, service: str | None = None, k: int = 3) -> list[ScoredIncident]:
-        records = self._records()
+    def search(
+        self, text: str, service: str | None = None, k: int = 3, exclude_ids: list[str] | None = None
+    ) -> list[ScoredIncident]:
+        excluded = set(exclude_ids or [])
+        # Only incidents someone actually resolved can say anything about a resolution; the pipeline files
+        # every new incident with a placeholder, and those labels came from the keyword classifier.
+        records = [r for r in self._records() if r.incident_id not in excluded and r.resolution.strip() != UNRESOLVED_RESOLUTION]
         query_terms = Counter(_tokens(text))
         if not records or not query_terms:
             return []

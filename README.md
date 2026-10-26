@@ -160,6 +160,9 @@ Open:
 - `GET /v1/metrics/summary`
 - `POST /v1/changes/{change_id}/prepare-pr`
 - `POST /v1/changes/{change_id}/execute-dev`
+- `POST /v1/changes/{change_id}/investigate` (start an agent run; needs `AGENT_RUN_MODE` manual or auto)
+- `GET /v1/changes/{change_id}/agent-run`
+- `GET /v1/scenarios` and `POST /v1/incidents/scenario/{name}` (simulated incidents)
 - `POST /v1/changes/{change_id}/refresh-status` (resolve a dev build or prod deploy that was still running)
 - `POST /v1/changes/{change_id}/decision`
 - `POST /v1/changes/{change_id}/promote` (reserves the promotion first; only a confirmed Jenkins `SUCCESS` becomes `promoted_to_prod`)
@@ -318,7 +321,34 @@ The Fixer (`src/app/agents/fixer.py`) is a model-driven tool loop that edits fil
 
 The Critic (`src/app/agents/critic.py`) reviews a fix that has already passed verification. Rules check that verification really passed, that the diagnosis was confident, that the changed files are the ones the evidence implicates (scope creep is sent back), and how risky the change is (touching payment, auth or schema paths, many files, many lines). `CRITIC_MODE=llm` lets a model add concerns, but never approve or clear a failed check. `approve_for_human` is not an approval: a person still decides.
 
-Neither is wired into the live incident flow yet.
+## Agent Run (Investigator -> Fixer -> Verifier -> Critic)
+
+`src/app/agents/graph.py` is a LangGraph graph that runs the four agents for a change:
+
+```text
+investigate -> fix -> verify -> review -> ready for a person to approve
+                 ^        |         |
+                 +-- retry (clean worktree, up to AGENT_MAX_FIX_ATTEMPTS) --+
+any stage -> escalated, with the reason written on the change
+```
+
+A run ends in exactly one of two places: `ready_for_prod` (a verified, reviewed fix waiting for a person) or `escalated`. It can never approve or promote: those still need an approver, then a different release operator, through the same endpoints and policy gate as before. The Verifier's evidence becomes the change's dev-execution evidence and the Investigator's evidence-based confidence replaces the keyword guess, so the policy gate judges what the agents actually found.
+
+`AGENT_RUN_MODE` (default `off`, so nothing changes until you opt in):
+
+| Mode | Behavior |
+|---|---|
+| `off` | No runs. |
+| `manual` | `POST /v1/changes/{id}/investigate` (or the dashboard's **Run Agents** button) starts a run in the background. |
+| `auto` | Every new incident, from the API or the scheduler, starts a run. |
+
+Try it without a real alert: `GET /v1/scenarios` lists simulated incidents and `POST /v1/incidents/scenario/{name}` opens a change from one (the dashboard has a picker). That endpoint is refused when real metrics are configured. `GET /v1/changes/{id}/agent-run` returns the reports, and the dashboard shows the diagnosis, evidence, each attempt's checks and the Critic's concerns.
+
+Notes:
+- With `FIXER_MODE=off` (default) a run investigates, writes its diagnosis on the change, then escalates; it never invents a change. Set `FIXER_MODE=llm` and an `LLM_API_KEY` to let it propose fixes.
+- Each run works on its own branch, `agent-fix/<change>-<service>`, in a disposable git worktree under `.agent_worktrees/`. Worktrees are kept after a run so you can inspect them; they are git-ignored.
+- In-flight run state is held in memory. Results are saved on the change, and a restart escalates any run it interrupted.
+
 
 ## Safety and Governance
 

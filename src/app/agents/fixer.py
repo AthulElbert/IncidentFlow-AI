@@ -81,7 +81,7 @@ class Fixer:
                     steps += 1
                     continue
                 steps += 1
-                observation = self._run_tool(reply, tools)
+                observation = self._run_tool(reply, tools, ctx.incident_id)
                 payload: dict[str, Any] = {"observation": observation, "steps_remaining": self.max_steps - steps}
                 if steps >= self.max_steps:
                     payload["instruction"] = FIXER_FINAL_INSTRUCTION
@@ -171,7 +171,7 @@ class Fixer:
             }
         return task
 
-    def _run_tool(self, request: dict[str, Any], tools: AgentTools) -> dict[str, Any]:
+    def _run_tool(self, request: dict[str, Any], tools: AgentTools, ctx_incident_id: str = "") -> dict[str, Any]:
         tool, method = request.get("tool"), request.get("method")
         args = request.get("args") if isinstance(request.get("args"), dict) else {}
         try:
@@ -193,7 +193,7 @@ class Fixer:
             if (tool, method) == ("sandbox", "diff"):
                 return {"diff": tools.sandbox.diff()[:MAX_READ_CHARS]}
             if (tool, method) == ("memory", "search"):
-                found = tools.memory.search(clean_text(str(args.get("text", "")), 300), k=3)
+                found = tools.memory.search(clean_text(str(args.get("text", "")), 300), k=3, exclude_ids=[ctx_incident_id])
                 return {
                     "matches": [
                         {"incident_id": m.incident_id, "issue_type": m.issue_type, "resolution": clean_text(m.resolution, 200)}

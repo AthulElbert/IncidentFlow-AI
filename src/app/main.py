@@ -50,10 +50,14 @@ from app.services.pr_preparer import PRPreparationService
 from app.services.scheduler import AlertDedupStore, IncidentScheduler
 from app.services.triage_agent import TriageAgent
 from app.storage import atomic_write_text
+from app.replay import event_for
 from app.tools.factory import build_toolkit
+from app.tools.scenarios import DEFAULT_SCENARIOS
 from app.agents.critic import Critic
+from app.agents.graph import AgentRuntime
 from app.agents.fixer import Fixer
 from app.agents.investigator import Investigator
+from app.agents.runner import AgentRunner
 from app.agents.verifier import Verifier
 
 app = FastAPI(title="Production Support Agent MVP", version="0.11.0")
@@ -187,6 +191,23 @@ critic = Critic(
     min_improvement=settings.verifier_min_improvement,
 )
 
+agent_runtime = AgentRuntime(
+    change_store=change_store,
+    toolkit=toolkit,
+    sandbox_provider=sandbox_provider,
+    investigator=investigator,
+    fixer=fixer,
+    verifier=verifier,
+    critic=critic,
+    audit=audit_log,
+    max_attempts=settings.agent_max_fix_attempts,
+)
+agent_runner = AgentRunner(agent_runtime, workers=settings.agent_run_workers)
+# A restart ends any run that was in flight; make that visible instead of leaving it "running".
+change_store.recover_interrupted_runs()
+if settings.agent_run_mode == "auto":
+    pipeline.on_change_created = lambda change_id: agent_runner.start(change_id, actor="agent:orchestrator")
+
 scheduler_dedup_path = str(base_dir / settings.scheduler_dedup_file)
 alert_dedup_store = AlertDedupStore(file_path=scheduler_dedup_path)
 scheduler = IncidentScheduler(
@@ -236,6 +257,7 @@ logger.info(
         "code_fix_mode": settings.code_fix_mode,
         "tool_modes": tool_modes,
         "investigator_mode": settings.investigator_mode,
+        "agent_run_mode": settings.agent_run_mode,
         "fixer_mode": settings.fixer_mode,
         "critic_mode": settings.critic_mode,
         "dev_environment": tool_modes.get("deploy_target"),
@@ -253,6 +275,7 @@ async def _lifespan(_: FastAPI):
         scheduler.start()
     yield
     scheduler.stop()
+    agent_runner.shutdown()
 
 
 app.router.lifespan_context = _lifespan
@@ -373,6 +396,62 @@ def get_metrics_summary(principal: Principal = Depends(viewer_auth)) -> MetricsS
         changes=changes,
         min_confidence_for_prod=settings.min_confidence_for_prod,
     )
+
+
+@app.get("/v1/scenarios")
+def list_scenarios(principal: Principal = Depends(viewer_auth)) -> list[dict]:
+    """Built-in simulated incidents, for trying the agents without a real alert."""
+    _ = principal
+    return [
+        {"name": item.name, "service": item.service, "alert": item.alert_message, "tags": list(item.tags)}
+        for item in DEFAULT_SCENARIOS
+    ]
+
+
+@app.post("/v1/incidents/scenario/{name}", response_model=IncidentResponse)
+def create_scenario_incident(name: str, principal: Principal = Depends(approver_auth)) -> IncidentResponse:
+    """Open a change from a simulated incident. Refused unless the metrics tool is also simulated."""
+    _ = principal
+    if tool_modes.get("metrics") != "mock":
+        raise HTTPException(status_code=409, detail="Scenario incidents are simulations and are disabled when real metrics are configured")
+    scenario = next((item for item in DEFAULT_SCENARIOS if item.name == name), None)
+    if scenario is None:
+        raise HTTPException(status_code=404, detail="Unknown scenario")
+    return pipeline.process_event(event_for(scenario))
+
+
+@app.post("/v1/changes/{change_id}/investigate", status_code=202)
+def start_agent_run(change_id: str, principal: Principal = Depends(approver_auth)) -> dict:
+    """Run the Investigator, Fixer, Verifier and Critic for this change, in the background."""
+    if settings.agent_run_mode == "off":
+        raise HTTPException(status_code=409, detail="Agent runs are disabled (AGENT_RUN_MODE=off)")
+    try:
+        record, _ = agent_runner.start(change_id, actor=principal.actor)
+    except ValueError as exc:
+        message = str(exc)
+        if message == "Change not found":
+            raise HTTPException(status_code=404, detail=message) from exc
+        raise HTTPException(status_code=409, detail=message) from exc
+    return {
+        "change_id": record.change_id,
+        "agent_run_status": record.agent_run_status,
+        "deployment_state": record.deployment_state,
+        "run": record.agent_run.get("run"),
+    }
+
+
+@app.get("/v1/changes/{change_id}/agent-run")
+def get_agent_run(change_id: str, principal: Principal = Depends(viewer_auth)) -> dict:
+    _ = principal
+    record = change_store.get_change(change_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Change not found")
+    return {
+        "change_id": record.change_id,
+        "agent_run_status": record.agent_run_status,
+        "deployment_state": record.deployment_state,
+        "agent_run": record.agent_run,
+    }
 
 
 @app.get("/v1/audit", response_model=list[AuditEntry])

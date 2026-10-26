@@ -6,3 +6,4 @@ pytest>=8.3.0
 httpx>=0.28.0
 PyJWT>=2.9.0
 psycopg[binary]>=3.2.0
+langgraph>=1.0.0

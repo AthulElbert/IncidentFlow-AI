@@ -288,6 +288,10 @@
         <button id="mockBtn">Create Mock Incident</button>
         <button id="compareBtn" class="ghost">Compare Triage Modes (Heuristic vs AI)</button>
       </div>
+      <div class="controls" id="scenarioControls" style="margin-top:8px;display:none;">
+        <select id="scenarioSelect" aria-label="Simulated incident"></select>
+        <button id="scenarioBtn" class="secondary">Create Simulated Incident</button>
+      </div>
 
       <div id="latestReasoning"></div>
       <div id="compareGrid"></div>
@@ -335,6 +339,7 @@
         <textarea id="actionComment" placeholder="Optional comment used for prepare-pr / decision / promote"></textarea>
       </div>
       <div class="btn-row">
+        <button id="runAgentsBtn" class="secondary">Run Agents</button>
         <button id="preparePrBtn" class="secondary">Prepare Draft PR</button>
         <button id="executeDevBtn" class="secondary">Execute Dev Validation</button>
         <button id="refreshBuildBtn" class="secondary">Refresh Build Status</button>
@@ -671,11 +676,123 @@
       }
     }
 
+
+    // ---- agent run -------------------------------------------------------------------
+    const AGENT_STATUS = {
+      running: ["Agents working", "warn"],
+      ready_for_approval: ["Ready for a person to approve", "ok"],
+      escalated: ["Handed to a person", "bad"],
+    };
+
+    function verdictKind(v) { return v === "passed" || v === "approve_for_human" ? "ok" : (v === "inconclusive" || v === "send_back" ? "warn" : "bad"); }
+
+    function attemptHtml(a) {
+      const fix = a.fix || {};
+      const files = (fix.files || []).map(escapeHtml).join(", ") || "no files";
+      let html = `<li><strong>Attempt ${escapeHtml(a.attempt)}</strong> · Fixer: ${escapeHtml(fix.status || "")}${fix.summary ? " — " + escapeHtml(fix.summary) : ""}` +
+        `${fix.reason ? " — " + escapeHtml(fix.reason) : ""} <span class="k">(${files})</span>`;
+      if (a.verification) {
+        const checks = (a.verification.checks || []).map((c) => `${escapeHtml(c.name)}: ${escapeHtml(c.status)}`).join(" · ");
+        html += `<br>Verifier ${pillFor(a.verification.verdict, verdictKind(a.verification.verdict))} <span class="k">${checks}</span>`;
+      }
+      if (a.review) {
+        const concerns = (a.review.concerns || []).filter((c) => c.severity !== "info")
+          .map((c) => `<li>${escapeHtml(c.severity)}: ${escapeHtml(c.text)}</li>`).join("");
+        html += `<br>Critic ${pillFor(a.review.decision, verdictKind(a.review.decision))} risk ${escapeHtml(a.review.risk)}` +
+          (concerns ? `<ul class="policy-list">${concerns}</ul>` : "");
+      }
+      return html + "</li>";
+    }
+
+    async function agentRunHtml(changeId) {
+      let data;
+      try { data = await api(`/v1/changes/${encodeURIComponent(changeId)}/agent-run`, { role: "viewer" }); } catch { return ""; }
+      if (data.agent_run_status === "not_started") return "";
+      const run = data.agent_run || {};
+      const [label, kind] = AGENT_STATUS[data.agent_run_status] || [data.agent_run_status, "warn"];
+      const inv = run.investigation;
+      let html = `<div style="margin-top:12px;"><span class="k" style="font-size:0.85rem;">Agent run #${escapeHtml(run.run || 1)}:</span> ${pillFor(label, kind)}`;
+      if (run.escalation_reason) html += `<p class="status" style="white-space:pre-wrap;margin-top:6px;">${escapeHtml(run.escalation_reason)}</p>`;
+      if (run.summary) html += `<p class="status" style="margin-top:6px;">${escapeHtml(run.summary)}</p>`;
+      if (inv) {
+        const top = (inv.hypotheses || [])[0];
+        if (top) {
+          html += `<p style="margin:8px 0 2px;font-size:0.85rem;"><strong>Diagnosis:</strong> ${escapeHtml(top.issue_type)} ` +
+            `(confidence ${Number(top.confidence).toFixed(2)}, ${escapeHtml(inv.mode_used)}) — ${escapeHtml(top.root_cause)}</p>`;
+        }
+        const others = (inv.hypotheses || []).slice(1).map((h) => `${escapeHtml(h.issue_type)} ${Number(h.confidence).toFixed(2)}`).join(", ");
+        if (others) html += `<p class="status" style="margin:0;">Also considered: ${others}</p>`;
+        const evidence = (inv.evidence || []).map((e) => `<li>${escapeHtml(e.id)} · ${escapeHtml(e.kind)} · ${escapeHtml(e.summary)}</li>`).join("");
+        html += `<details style="margin-top:6px;"><summary class="k">Evidence (${(inv.evidence || []).length}) — logs and deploy notes are untrusted text</summary>` +
+          `<ul class="policy-list" style="color:inherit;list-style:none;padding-left:0;">${evidence}</ul></details>`;
+      }
+      const attempts = (run.attempts || []).map(attemptHtml).join("");
+      if (attempts) html += `<ul class="policy-list" style="color:inherit;list-style:none;padding-left:0;margin-top:8px;">${attempts}</ul>`;
+      return html + "</div>";
+    }
+
+    async function loadScenarios() {
+      try {
+        const scenarios = await api("/v1/scenarios", { role: "viewer" });
+        el("scenarioSelect").innerHTML = scenarios
+          .map((s) => `<option value="${escapeHtml(s.name)}">${escapeHtml(s.name)} — ${escapeHtml(s.alert)}</option>`).join("");
+        el("scenarioControls").style.display = scenarios.length ? "" : "none";
+      } catch { el("scenarioControls").style.display = "none"; }
+    }
+
+    async function createScenarioIncident() {
+      const name = el("scenarioSelect").value;
+      el("scenarioBtn").disabled = true;
+      try {
+        const body = await api(`/v1/incidents/scenario/${encodeURIComponent(name)}`, { method: "POST", role: "approver" });
+        const changeId = body?.metadata?.change_id || "";
+        setStatus(`Simulated incident '${name}' created. change_id=${changeId}. Use Run Agents to investigate it.`);
+        await refreshChangesList();
+        if (changeId) await selectChange(changeId);
+        await loadMetrics();
+      } catch (err) {
+        setStatus(`Create simulated incident failed: ${err.message}`);
+      } finally {
+        el("scenarioBtn").disabled = false;
+      }
+    }
+
+    let agentPoll = null;
+    async function watchAgentRun(changeId, attemptsLeft = 120) {
+      clearTimeout(agentPoll);
+      try {
+        await refreshChangesList();
+        if (selectedChangeId === changeId) await loadChangeDetail(changeId);
+        const data = await api(`/v1/changes/${encodeURIComponent(changeId)}/agent-run`, { role: "viewer" });
+        if (data.agent_run_status === "running" && attemptsLeft > 0) {
+          agentPoll = setTimeout(() => watchAgentRun(changeId, attemptsLeft - 1), 1500);
+        } else {
+          setStatus(`Agent run finished: ${data.agent_run_status}. deployment_state=${data.deployment_state}`);
+          await loadMetrics();
+        }
+      } catch (err) {
+        setStatus(`Could not read the agent run: ${err.message}`);
+      }
+    }
+
+    async function runAgents() {
+      if (!selectedChangeId) { setStatus("Select a change first."); return; }
+      const changeId = selectedChangeId;
+      try {
+        setStatus("Starting the agents (Investigator, Fixer, Verifier, Critic)...");
+        await api(`/v1/changes/${encodeURIComponent(changeId)}/investigate`, { method: "POST", role: "approver" });
+        watchAgentRun(changeId);
+      } catch (err) {
+        setStatus(`Run agents failed: ${err.message}`);
+      }
+    }
+
     async function loadChangeDetail(changeId) {
       try {
         const c = await api(`/v1/changes/${encodeURIComponent(changeId)}`, { role: "viewer" });
         renderStepper(c);
         const auditHtml = await auditTrailHtml(changeId);
+        const agentHtml = await agentRunHtml(changeId);
         const correlatedHtml = c.alert_count > 1
           ? `<div><span class="k">Correlated alerts:</span> ${c.alert_count} (${c.related_alerts.map(escapeHtml).join(", ")})</div>`
           : "";
@@ -699,6 +816,7 @@
           </div>
           <div style="margin-top:8px;"><span class="k" style="font-size:0.85rem;">Policy check:</span> ${policyHtml}</div>
           ${codeFixHtml(c)}
+          ${agentHtml}
           ${auditHtml}
         `;
 
@@ -845,12 +963,15 @@
     el("approveBtn").addEventListener("click", () => decide("approve"));
     el("rejectBtn").addEventListener("click", () => decide("reject"));
     el("promoteBtn").addEventListener("click", promote);
+    el("runAgentsBtn").addEventListener("click", runAgents);
+    el("scenarioBtn").addEventListener("click", createScenarioIncident);
     el("queueAlertBtn").addEventListener("click", () => queueSchedulerAlert(false));
     el("seedSafeAlertBtn").addEventListener("click", () => queueSchedulerAlert(true));
     el("runSchedulerBtn").addEventListener("click", runSchedulerOnce);
     el("refreshSchedulerBtn").addEventListener("click", refreshSchedulerStatus);
 
     loadKeys();
+    loadScenarios();
     refreshChangesList();
     loadMetrics();
     refreshSchedulerStatus();

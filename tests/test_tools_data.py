@@ -186,3 +186,30 @@ def test_baseline_keyword_classifier_misses_the_dependency_scenarios():
             wrong.add(scenario.name)
 
     assert wrong == {"dependency_timeouts", "red_herring_deploys"}
+
+
+# --- incident memory only offers incidents that were actually resolved ---------------------
+
+
+def test_incidents_filed_with_the_placeholder_resolution_are_never_offered_as_evidence():
+    from app.models.schemas import UNRESOLVED_RESOLUTION
+
+    unresolved = _record("INC-U", "checkout-service", "dependency_timeout_ms", "dependency_failure",
+                         "inventory-db connection pool exhausted", UNRESOLVED_RESOLUTION)
+    resolved = _record("INC-R", "ledger-service", "dependency_timeout_ms", "dependency_failure",
+                       "inventory-db connection pool exhausted", "Raised the pool size.")
+
+    results = LexicalIncidentMemory(lambda: [unresolved, resolved]).search("inventory-db connection pool exhausted", service="checkout-service")
+
+    assert [item.incident_id for item in results] == ["INC-R"]
+
+
+def test_the_incident_being_investigated_is_excluded_from_its_own_evidence():
+    records = [
+        _record("INC-SELF", "svc", "m", "application_error", "checkout failure after deploy", "Rolled back the deploy."),
+        _record("INC-OLD", "other", "m", "application_error", "checkout failure after deploy", "Rolled back the deploy."),
+    ]
+    memory = LexicalIncidentMemory(lambda: records)
+
+    assert {r.incident_id for r in memory.search("checkout failure after deploy")} == {"INC-SELF", "INC-OLD"}
+    assert [r.incident_id for r in memory.search("checkout failure after deploy", exclude_ids=["INC-SELF"])] == ["INC-OLD"]
