@@ -157,6 +157,7 @@ Open:
 - `GET /v1/changes/{change_id}`
 - `GET /v1/changes/overview` (one small row per change, newest first, with what each is waiting for; cheap to poll)
 - `GET /v1/changes/{change_id}/review` (the case file a person decides from: diagnosis, evidence, verified diff, checks, Critic, policy result, which actions are open and why not, and a timeline)
+- `GET /v1/changes/{change_id}/postmortem` (postmortem draft, markdown)
 - `GET /v1/whoami` (the actor and role a key belongs to)
 - `GET /v1/changes/{change_id}/audit` (who did what to this change, oldest first)
 - `GET /v1/audit` (most recent audit entries across all changes)
@@ -192,6 +193,21 @@ Notes:
 - If `PR_LOCAL_BRANCH_MODE=git`, service attempts `git branch <generated-branch>`
 - If `CODE_CHANGE_MODE=sandbox_git`, service creates/uses `.agent_worktrees/<branch>` and applies real file edits with path/size guardrails.
 - In scheduler mode (`APM_POLL_MODE=poll`), the app continuously polls alerts and applies dedup before processing.
+
+## Learning From Outcomes and Postmortems
+
+Incident memory only offers incidents that someone actually resolved. Every incident has an `outcome`:
+
+| Outcome | Meaning | Offered as evidence? |
+|---|---|---|
+| `historical` | Seed data recorded before outcomes were tracked | Yes |
+| `open` | Filed by the pipeline, still being worked | No (it still counts for recurrence detection) |
+| `resolved` | The fix was approved and released to production | Yes |
+| `rejected` | A person turned the proposed fix down | No |
+
+When a change reaches `promoted_to_prod` or `closed_rejected`, a background consumer on the event bus (plus a sweep at startup, in case events were lost in a restart) updates its incident. A resolved incident's `resolution` is written from the change's facts: what was changed, the dev before/after alert metric, who approved and who released it. No model writes it. Learning the same outcome twice changes nothing.
+
+`GET /v1/changes/{id}/postmortem` returns a markdown postmortem draft built from the same records (summary, diagnosis and the evidence behind it, the diff, verification, decisions, timeline) with a checklist of judgement calls left to the people involved. The dashboard shows it for finished changes. `/v1/metrics/summary` also reports how the agents are doing: runs, share ending in a verified fix, escalation rate, human override rate and average run time.
 
 ## Dashboard Demo
 

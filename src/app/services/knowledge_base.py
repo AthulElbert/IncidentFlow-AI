@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from app.models.schemas import IncidentRecord, SimilarIncident
+from app.models.schemas import UNRESOLVED_RESOLUTION, IncidentRecord, SimilarIncident
 from app.storage import atomic_write_text
 
 
@@ -35,6 +35,23 @@ class IncidentKnowledgeBase:
         payload = [item.model_dump(mode="json") for item in self._records]
         atomic_write_text(self.data_path, json.dumps(payload, indent=2))
 
+    def get(self, incident_id: str) -> IncidentRecord | None:
+        return next((item for item in self._records if item.incident_id == incident_id), None)
+
+    def update_record(self, record: IncidentRecord) -> None:
+        """Replace the stored record with the same id (used when an outcome is learned)."""
+        for index, existing in enumerate(self._records):
+            if existing.incident_id == record.incident_id:
+                self._records[index] = record
+                break
+        else:
+            raise ValueError(f"Unknown incident {record.incident_id}")
+        if self._use_postgres:
+            self._add_record_postgres(record)
+            return
+        payload = [item.model_dump(mode="json") for item in self._records]
+        atomic_write_text(self.data_path, json.dumps(payload, indent=2))
+
     def find_similar(self, service: str, metric: str, issue_type: str, top_k: int = 3) -> list[SimilarIncident]:
         scored: list[SimilarIncident] = []
         for rec in self._records:
@@ -52,7 +69,9 @@ class IncidentKnowledgeBase:
                         incident_id=rec.incident_id,
                         score=round(score, 2),
                         summary=rec.summary,
-                        resolution=rec.resolution,
+                        # An incident nobody has resolved yet must not lend its placeholder (or a copy of someone
+                        # else's resolution) to the next one; it still counts as a similar, recurring incident.
+                        resolution=rec.resolution if rec.reusable else UNRESOLVED_RESOLUTION,
                     )
                 )
 

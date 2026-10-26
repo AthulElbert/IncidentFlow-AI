@@ -1,4 +1,6 @@
 from collections import Counter
+from datetime import datetime
+
 from app.models.schemas import ChangeRecord, MetricsSummary
 
 
@@ -12,6 +14,15 @@ def _avg(values: list[float]) -> float:
     if not values:
         return 0.0
     return round(sum(values) / len(values), 2)
+
+
+def _run_seconds(run: dict) -> float | None:
+    try:
+        started = datetime.fromisoformat(run["started_at"])
+        finished = datetime.fromisoformat(run["finished_at"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return (finished - started).total_seconds()
 
 
 def build_metrics_summary(
@@ -39,7 +50,21 @@ def build_metrics_summary(
         if item.promoted_at:
             prod_durations.append((item.promoted_at - item.created_at).total_seconds())
 
+    runs = [item for item in changes if item.agent_run_status != "not_started"]
+    escalated_runs = sum(1 for item in runs if item.agent_run_status == "escalated")
+    ready_runs = [item for item in runs if item.agent_run_status == "ready_for_approval"]
+    decided_fixes = [item for item in ready_runs if item.status != "pending_approval"]
+    overridden = sum(1 for item in decided_fixes if item.status == "rejected")
+    run_seconds = [
+        seconds for seconds in (_run_seconds(item.agent_run) for item in runs if item.agent_run_status != "running") if seconds is not None
+    ]
+
     return MetricsSummary(
+        agent_runs=len(runs),
+        agent_escalation_rate=_to_rate(escalated_runs, len(runs)),
+        agent_fix_ready_rate=_to_rate(len(ready_runs), len(runs)),
+        human_override_rate=_to_rate(overridden, len(decided_fixes)),
+        avg_agent_run_seconds=_avg(run_seconds),
         total_changes=total,
         status_counts=dict(status_counts),
         deployment_state_counts=dict(deployment_state_counts),

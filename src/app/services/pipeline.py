@@ -126,6 +126,7 @@ class SupportAgentPipeline:
             ),
             runbook_actions=suggestions,
             created_at=datetime.now(timezone.utc),
+            outcome="open",
         )
         self.kb.add_record(incident)
 

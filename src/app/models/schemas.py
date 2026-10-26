@@ -29,6 +29,12 @@ class APMEvent(BaseModel):
     message: str
 
 
+# `historical` incidents were recorded before outcomes were tracked (seed data). `open` ones were filed by the
+# pipeline and are still being worked; `resolved` ones were fixed and released; `rejected` ones had their proposed
+# fix turned down by a person. Only `historical` and `resolved` say anything about how to resolve another incident.
+REUSABLE_OUTCOMES = frozenset({"historical", "resolved"})
+
+
 class IncidentRecord(BaseModel):
     incident_id: str
     service: str
@@ -38,6 +44,13 @@ class IncidentRecord(BaseModel):
     resolution: str
     runbook_actions: list[str] = Field(default_factory=list)
     created_at: datetime
+    outcome: Literal["historical", "open", "resolved", "rejected"] = "historical"
+    outcome_at: datetime | None = None
+    outcome_note: str = ""
+
+    @property
+    def reusable(self) -> bool:
+        return self.outcome in REUSABLE_OUTCOMES and self.resolution.strip() != UNRESOLVED_RESOLUTION
 
 
 class JiraTicket(BaseModel):
@@ -247,3 +260,9 @@ class MetricsSummary(BaseModel):
     promotion_success_rate: float
     avg_time_to_dev_seconds: float
     avg_time_to_prod_seconds: float
+    # How the agents are doing, as people experienced it.
+    agent_runs: int = 0
+    agent_escalation_rate: float = 0.0  # of runs, the share handed to a person
+    agent_fix_ready_rate: float = 0.0  # of runs, the share that ended in a verified fix waiting for a decision
+    human_override_rate: float = 0.0  # of verified fixes a person decided on, the share they rejected
+    avg_agent_run_seconds: float = 0.0

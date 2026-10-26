@@ -423,6 +423,10 @@
         <div class="kpi"><div class="label">Promotion Success Rate</div><div id="k-prod" class="value">0%</div></div>
         <div class="kpi"><div class="label">Avg Time To Dev</div><div id="k-tdev" class="value">0s</div></div>
         <div class="kpi"><div class="label">Avg Time To Prod</div><div id="k-tprod" class="value">0s</div></div>
+        <div class="kpi"><div class="label">Agent Runs</div><div id="k-runs" class="value">0</div></div>
+        <div class="kpi"><div class="label">Fix Ready Rate</div><div id="k-ready" class="value">0%</div></div>
+        <div class="kpi warn"><div class="label">Agent Escalation Rate</div><div id="k-escal" class="value">0%</div></div>
+        <div class="kpi bad"><div class="label">Human Override Rate</div><div id="k-override" class="value">0%</div></div>
       </div>
     </div>
 
@@ -530,6 +534,10 @@
         setKpi("k-prod", asPct(m.promotion_success_rate));
         setKpi("k-tdev", asSec(m.avg_time_to_dev_seconds));
         setKpi("k-tprod", asSec(m.avg_time_to_prod_seconds));
+        setKpi("k-runs", String(m.agent_runs ?? 0));
+        setKpi("k-ready", asPct(m.agent_fix_ready_rate));
+        setKpi("k-escal", asPct(m.agent_escalation_rate));
+        setKpi("k-override", asPct(m.human_override_rate));
         const total = Number(m.total_changes || 0);
         renderBars("issueBars", m.issue_type_counts, total);
         renderBars("stateBars", m.deployment_state_counts, total);
@@ -946,6 +954,36 @@
       return `<details data-key="timeline" class="section-block" open><summary class="k">Timeline (${review.timeline.length})</summary><ol class="timeline">${rows}</ol></details>`;
     }
 
+    function postmortemHtml(review) {
+      if (!review.terminal) return "";
+      return `<details data-key="postmortem" class="section-block"><summary class="k">Postmortem draft</summary>
+        <p class="status">Built from the platform's records. It states what happened and leaves the judgement to the people involved.</p>
+        <div class="btn-row"><button data-act="postmortem" class="ghost small" type="button">Generate draft</button>
+        <button data-act="copy-postmortem" class="ghost small" type="button" style="display:none;">Copy</button></div>
+        <pre id="postmortemText" class="patch" style="display:none;max-height:420px;white-space:pre-wrap;"></pre></details>`;
+    }
+
+    async function showPostmortem() {
+      try {
+        const body = await api(`/v1/changes/${encodeURIComponent(selectedChangeId)}/postmortem`, { role: "viewer" });
+        const pre = el("postmortemText");
+        pre.textContent = body.markdown;
+        pre.style.display = "block";
+        document.querySelector('button[data-act="copy-postmortem"]').style.display = "";
+      } catch (err) {
+        setStatus(`Could not build the postmortem: ${err.message}`);
+      }
+    }
+
+    async function copyPostmortem() {
+      try {
+        await navigator.clipboard.writeText(el("postmortemText").textContent);
+        setStatus("Postmortem draft copied.");
+      } catch {
+        setStatus("Copy is not available here; select the text instead.");
+      }
+    }
+
     function bannerHtml(review, c) {
       let kind = (ATTENTION[review.attention] || [])[1] || "";
       if (c.deployment_state === "promoted_to_prod") kind = "ok";
@@ -1010,6 +1048,7 @@
           runSummaryHtml(review, c),
           evidenceHtml(review),
           timelineHtml(review),
+          postmortemHtml(review),
           legacy,
         ].join("");
 
@@ -1050,6 +1089,8 @@
       if (act === "approve") decide("approve");
       else if (act === "reject") decide("reject");
       else if (act === "promote") promote();
+      else if (act === "postmortem") showPostmortem();
+      else if (act === "copy-postmortem") copyPostmortem();
     });
     el("changeDetail").addEventListener("change", (event) => {
       if (event.target.id === "reviewedBox" && lastReview) syncApproveButton(lastReview);

@@ -34,6 +34,7 @@ from app.services.change_control import ChangeControlStore, ConcurrentModificati
 from app.services.code_fix_agent import CodeFixAgent
 from app.services.correlation import AlertCorrelator
 from app.services.dev_fix_executor import DevFixExecutor
+from app.services.consumer import ConsumerLoop
 from app.services.integration_factory import (
     build_apm_alert_source,
     build_apm_client,
@@ -45,9 +46,11 @@ from app.services.integration_factory import (
     build_llm_client,
     build_pr_client,
 )
+from app.services.learning import OutcomeLearner
 from app.services.metrics import build_metrics_summary
 from app.services.pipeline import SupportAgentPipeline
 from app.services.pr_preparer import PRPreparationService
+from app.services.postmortem import build_postmortem
 from app.services.review import build_review, overview_row
 from app.services.scheduler import AlertDedupStore, IncidentScheduler
 from app.services.triage_agent import TriageAgent
@@ -207,6 +210,11 @@ agent_runtime = AgentRuntime(
 agent_runner = AgentRunner(agent_runtime, workers=settings.agent_run_workers)
 # A restart ends any run that was in flight; make that visible instead of leaving it "running".
 change_store.recover_interrupted_runs()
+
+# What happened to a change becomes what incident memory knows. The sweep covers events the bus lost in a restart.
+outcome_learner = OutcomeLearner(change_store, pipeline.kb, event_bus)
+outcome_learner.reconcile()
+learning_loop = ConsumerLoop("learning", outcome_learner.run_once, interval_seconds=2.0)
 if settings.agent_run_mode == "auto":
     pipeline.on_change_created = lambda change_id: agent_runner.start(change_id, actor="agent:orchestrator")
 
@@ -275,7 +283,9 @@ logger.info(
 async def _lifespan(_: FastAPI):
     if settings.apm_poll_mode == "poll":
         scheduler.start()
+    learning_loop.start()
     yield
+    learning_loop.stop()
     scheduler.stop()
     agent_runner.shutdown()
 
@@ -416,6 +426,18 @@ def get_change_review(change_id: str, principal: Principal = Depends(viewer_auth
         raise HTTPException(status_code=404, detail="Change not found")
     entries = audit_log.list(entity_id=change_id, limit=500)
     return jsonable_encoder(build_review(record, entries, change_store, settings.agent_run_mode))
+
+
+@app.get("/v1/changes/{change_id}/postmortem")
+def get_change_postmortem(change_id: str, principal: Principal = Depends(viewer_auth)) -> dict:
+    """A postmortem draft built from the platform's records. Always a draft; a person edits and owns it."""
+    _ = principal
+    record = change_store.get_change(change_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Change not found")
+    entries = audit_log.list(entity_id=change_id, limit=500)
+    review = jsonable_encoder(build_review(record, entries, change_store, settings.agent_run_mode))
+    return {"change_id": change_id, "final": review["terminal"], "markdown": build_postmortem(record, review)}
 
 
 @app.get("/v1/metrics/summary", response_model=MetricsSummary)

@@ -3,7 +3,7 @@ import re
 from collections import Counter
 from typing import Callable, Protocol
 
-from app.models.schemas import UNRESOLVED_RESOLUTION, IncidentRecord
+from app.models.schemas import IncidentRecord
 from app.tools.models import ScoredIncident
 
 _STOPWORDS = frozenset(
@@ -53,7 +53,7 @@ class LexicalIncidentMemory:
         excluded = set(exclude_ids or [])
         # Only incidents someone actually resolved can say anything about a resolution; the pipeline files
         # every new incident with a placeholder, and those labels came from the keyword classifier.
-        records = [r for r in self._records() if r.incident_id not in excluded and r.resolution.strip() != UNRESOLVED_RESOLUTION]
+        records = [r for r in self._records() if r.incident_id not in excluded and r.reusable]
         query_terms = Counter(_tokens(text))
         if not records or not query_terms:
             return []
