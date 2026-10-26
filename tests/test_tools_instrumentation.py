@@ -246,6 +246,7 @@ def test_factory_defaults_to_mock_backends(monkeypatch, tmp_path):
         "logs": "mock",
         "deploys": "mock",
         "deploy_target": "mock",
+        "dev_metrics": "mock",
         "memory": "lexical",
     }
     assert toolkit.max_calls_per_run == 40
@@ -263,11 +264,21 @@ def test_factory_builds_the_local_backends(monkeypatch, tmp_path):
         LOGS_FILE_PATH="logs.jsonl",
         DEPLOY_HISTORY_MODE="changes",
         DEPLOY_TARGET_MODE="jenkins",
+        DEV_METRICS_MODE="prometheus",
+        DEV_METRICS_BASE_URL="http://127.0.0.1:9091",
         TOOL_MAX_CALLS_PER_RUN="12",
     )
 
     assert modes["metrics"] == "prometheus" and modes["logs"] == "file"
     assert modes["deploys"] == "changes" and modes["deploy_target"] == "jenkins"
+    assert modes["dev_metrics"] == "prometheus"
+
+
+def test_a_real_deploy_target_will_not_be_paired_with_simulated_dev_metrics(monkeypatch, tmp_path):
+    from app.services.integration_factory import IntegrationConfigError
+
+    with pytest.raises(IntegrationConfigError, match="DEV_METRICS_MODE=prometheus"):
+        _build(monkeypatch, tmp_path, DEPLOY_TARGET_MODE="jenkins")
 
 
 def test_a_prometheus_tool_with_no_url_fails_loudly_unless_fallback_is_allowed(monkeypatch, tmp_path):

@@ -41,7 +41,9 @@ AGENT_PERMISSIONS: dict[str, dict[str, frozenset[str]]] = {
     "verifier": {
         "sandbox": frozenset({"list_files", "read", "grep", "diff", "run_tests"}),
         "deploy_target": frozenset({"deploy_dev", "get_status"}),
+        # The incident as production saw it, and the dev environment after the fix is deployed.
         "metrics": frozenset({"available_metrics", "query"}),
+        "dev_metrics": frozenset({"available_metrics", "query"}),
     },
     "critic": {
         "sandbox": frozenset({"list_files", "read", "grep", "diff"}),
@@ -212,6 +214,7 @@ class Toolkit:
     deploys: DeployHistoryTool
     memory: IncidentMemory
     deploy_target: DeployTarget
+    dev_metrics: MetricsTool | None = None
     max_calls_per_run: int = 40
     permissions: dict[str, dict[str, frozenset[str]]] = field(default_factory=lambda: dict(AGENT_PERMISSIONS))
 
@@ -237,6 +240,7 @@ class Toolkit:
             "deploys": self.deploys,
             "memory": self.memory,
             "deploy_target": self.deploy_target,
+            "dev_metrics": self.dev_metrics,
             "sandbox": sandbox,
         }
         proxies = {

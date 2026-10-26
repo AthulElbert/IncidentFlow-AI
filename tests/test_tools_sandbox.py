@@ -235,6 +235,67 @@ def test_run_tests_with_a_missing_command_is_a_tool_error(repo):
         FileSandbox(repo, ["config"], test_command="definitely-not-a-real-program --x").run_tests()
 
 
+# --- diff in a git checkout -------------------------------------------------------------
+
+
+def _git_repo(root):
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True, capture_output=True)
+    subprocess.run(["git", "add", "-A"], cwd=root, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "base"],
+        cwd=root, check=True, capture_output=True,
+    )
+
+
+def test_in_a_git_checkout_the_diff_shows_what_actually_changed_even_behind_the_sandbox(repo):
+    _git_repo(repo)
+    sandbox = FileSandbox(repo, allowed_edit_paths=["config"], max_edit_lines=20)
+    sandbox.edit("config/app.yaml", "timeout_ms: 300\n")
+    (repo / "src" / "main.py").write_text("print('changed directly')\n", encoding="utf-8")  # not via the sandbox
+
+    diff = sandbox.diff()
+
+    assert "diff --git a/config/app.yaml b/config/app.yaml" in diff and "+timeout_ms: 300" in diff
+    assert "diff --git a/src/main.py b/src/main.py" in diff and "changed directly" in diff
+
+
+def test_new_files_appear_in_the_git_diff(repo):
+    _git_repo(repo)
+    (repo / "config" / "brand_new.yaml").write_text("a: 1\n", encoding="utf-8")
+
+    diff = FileSandbox(repo, allowed_edit_paths=["config"]).diff()
+
+    assert "diff --git a/config/brand_new.yaml b/config/brand_new.yaml" in diff and "+a: 1" in diff
+
+
+def test_protected_files_show_up_in_the_diff_by_path_but_never_by_content(repo):
+    _git_repo(repo)
+    (repo / ".env").write_text("LLM_API_KEY=changed-secret-value\n", encoding="utf-8")
+    (repo / "secrets" / "token.txt").write_text("rotated-token\n", encoding="utf-8")
+    (repo / "config" / "app.yaml").write_text("timeout_ms: 1\n", encoding="utf-8")
+
+    diff = FileSandbox(repo, allowed_edit_paths=["config"]).diff()
+
+    assert "diff --git a/.env b/.env" in diff and "diff --git a/secrets/token.txt b/secrets/token.txt" in diff
+    assert diff.count("# content hidden: protected file") == 2
+    assert "changed-secret-value" not in diff and "rotated-token" not in diff
+    assert "+timeout_ms: 1" in diff  # ordinary files keep their content
+
+
+def test_a_clean_git_checkout_has_an_empty_diff(repo):
+    _git_repo(repo)
+
+    assert FileSandbox(repo, allowed_edit_paths=["config"]).diff() == ""
+
+
+def test_a_command_given_as_a_list_runs_without_any_quoting_problems(repo):
+    (repo / "ok.py").write_text("print('fine')\n", encoding="utf-8")
+
+    result = FileSandbox(repo, ["config"], test_command=[sys.executable, "ok.py"]).run_tests()
+
+    assert result.passed and "fine" in result.output
+
+
 # --- git worktree provider --------------------------------------------------------------
 
 

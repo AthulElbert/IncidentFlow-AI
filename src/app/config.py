@@ -137,6 +137,13 @@ class Settings:
     investigation_min_confidence: float = 0.60
     investigation_min_margin: float = 0.10
     investigation_max_llm_steps: int = 3
+    dev_metrics_mode: str = "mock"
+    dev_metrics_base_url: str = ""
+    mock_dev_effect: str = "resolves"
+    verifier_deploy_wait_seconds: float = 120.0
+    verifier_poll_interval_seconds: float = 5.0
+    verifier_soak_minutes: float = 10.0
+    verifier_min_improvement: float = 0.5
 
 
 _TOOL_MODES = {
@@ -145,6 +152,8 @@ _TOOL_MODES = {
     "DEPLOY_HISTORY_MODE": ("deploy_history_mode", {"mock", "changes"}),
     "DEPLOY_TARGET_MODE": ("deploy_target_mode", {"mock", "jenkins"}),
     "INVESTIGATOR_MODE": ("investigator_mode", {"heuristic", "llm"}),
+    "DEV_METRICS_MODE": ("dev_metrics_mode", {"mock", "prometheus"}),
+    "MOCK_DEV_EFFECT": ("mock_dev_effect", {"resolves", "no_effect", "partial", "regresses_other", "deploy_fails"}),
 }
 
 
@@ -175,6 +184,12 @@ def validate_settings(settings: "Settings") -> None:
         errors.append("INVESTIGATION_MIN_CONFIDENCE must be in (0, 1]")
     if not 0.0 <= settings.investigation_min_margin < 1.0:
         errors.append("INVESTIGATION_MIN_MARGIN must be in [0, 1)")
+    if settings.dev_metrics_mode == "prometheus" and not settings.dev_metrics_base_url:
+        errors.append("DEV_METRICS_MODE=prometheus requires DEV_METRICS_BASE_URL")
+    if not 0.0 < settings.verifier_min_improvement <= 1.0:
+        errors.append("VERIFIER_MIN_IMPROVEMENT must be in (0, 1]")
+    if settings.verifier_soak_minutes <= 0 or settings.verifier_deploy_wait_seconds <= 0:
+        errors.append("VERIFIER_SOAK_MINUTES and VERIFIER_DEPLOY_WAIT_SECONDS must be positive")
 
     if settings.code_fix_mode == "llm":
         if not settings.llm_api_key:
@@ -302,4 +317,11 @@ def load_settings(base_dir: str | None = None) -> Settings:
         investigation_min_confidence=_as_float(os.getenv("INVESTIGATION_MIN_CONFIDENCE"), default=0.60),
         investigation_min_margin=_as_float(os.getenv("INVESTIGATION_MIN_MARGIN"), default=0.10),
         investigation_max_llm_steps=_as_int(os.getenv("INVESTIGATION_MAX_LLM_STEPS"), default=3),
+        dev_metrics_mode=os.getenv("DEV_METRICS_MODE", "mock").strip().lower(),
+        dev_metrics_base_url=os.getenv("DEV_METRICS_BASE_URL", "").strip(),
+        mock_dev_effect=os.getenv("MOCK_DEV_EFFECT", "resolves").strip().lower(),
+        verifier_deploy_wait_seconds=_as_float(os.getenv("VERIFIER_DEPLOY_WAIT_SECONDS"), default=120.0),
+        verifier_poll_interval_seconds=_as_float(os.getenv("VERIFIER_POLL_INTERVAL_SECONDS"), default=5.0),
+        verifier_soak_minutes=_as_float(os.getenv("VERIFIER_SOAK_MINUTES"), default=10.0),
+        verifier_min_improvement=_as_float(os.getenv("VERIFIER_MIN_IMPROVEMENT"), default=0.5),
     )

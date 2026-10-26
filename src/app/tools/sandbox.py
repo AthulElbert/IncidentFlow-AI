@@ -76,13 +76,36 @@ def _denied(rel: str, patterns: tuple[str, ...]) -> bool:
     return any(fnmatch.fnmatch(rel, pattern) or fnmatch.fnmatch(rel.split("/")[-1], pattern) for pattern in patterns)
 
 
+def is_protected_path(rel: str) -> bool:
+    """Files nobody may change through the agent workflow: secrets, git internals, CI and deploy files."""
+    return _denied(_normalize(rel), _EDIT_DENY)
+
+
+def is_under(rel: str, allowed_prefixes: list[str]) -> bool:
+    rel = _normalize(rel)
+    return any(rel == prefix or rel.startswith(prefix.rstrip("/") + "/") for prefix in map(_normalize, allowed_prefixes) if prefix)
+
+
+def _redact_hidden_files(diff: str) -> str:
+    """Keep every changed path visible but drop the content of files an agent may not read."""
+    parts = re.split(r"(?m)^(?=diff --git )", diff)
+    kept: list[str] = []
+    for part in parts:
+        header = re.match(r"diff --git a/(.+?) b/(.+)", part)
+        if header and _denied(header.group(2).strip(), _READ_DENY):
+            kept.append(f"diff --git a/{header.group(1)} b/{header.group(2)}\n# content hidden: protected file\n")
+        else:
+            kept.append(part)
+    return "".join(kept)
+
+
 class FileSandbox:
     def __init__(
         self,
         root: str | Path,
         allowed_edit_paths: list[str],
         max_edit_lines: int = 200,
-        test_command: str = "python -m pytest -q tests",
+        test_command: "str | list[str]" = "python -m pytest -q tests",
         test_timeout_seconds: int = 120,
         extra_env: dict[str, str] | None = None,
     ) -> None:
@@ -204,7 +227,40 @@ class FileSandbox:
         return EditResult(path=rel, lines=lines, changed=True)
 
     def diff(self) -> str:
-        """Unified diff of every file edited through this sandbox against its original content."""
+        """What actually changed in the checkout.
+
+        In a git worktree this is `git diff HEAD` (including new files), so it also shows edits
+        that bypassed this sandbox, which is what an independent verifier needs. Content of
+        protected files is replaced by a marker; their paths stay visible. Outside git it falls
+        back to the edits made through this sandbox.
+        """
+        from_git = self._git_diff()
+        return from_git if from_git is not None else self._snapshot_diff()
+
+    def _git(self, *args: str) -> subprocess.CompletedProcess | None:
+        try:
+            return subprocess.run(
+                ["git", *args], cwd=str(self.root), capture_output=True, text=True, timeout=30, check=False
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+    def _git_diff(self) -> str | None:
+        if not (self.root / ".git").exists():
+            return None
+        untracked = self._git("ls-files", "--others", "--exclude-standard", "-z")
+        if untracked is None or untracked.returncode != 0:
+            return None
+        new_files = [name for name in untracked.stdout.split("\0") if name]
+        if new_files:
+            # Intent-to-add makes brand-new files show up in `git diff HEAD`.
+            self._git("add", "-N", "--", *new_files)
+        diff = self._git("diff", "HEAD", "--no-color", "--no-ext-diff")
+        if diff is None or diff.returncode != 0:
+            return None
+        return _redact_hidden_files(diff.stdout)
+
+    def _snapshot_diff(self) -> str:
         chunks: list[str] = []
         for rel in sorted(self._originals):
             original = self._originals[rel]
@@ -232,8 +288,13 @@ class FileSandbox:
     def run_tests(self) -> TestResult:
         started = time.monotonic()
         try:
+            command = (
+                list(self.test_command)
+                if isinstance(self.test_command, (list, tuple))
+                else shlex.split(self.test_command, posix=os.name != "nt")
+            )
             proc = subprocess.run(
-                shlex.split(self.test_command, posix=os.name != "nt"),
+                command,
                 cwd=str(self.root),
                 env=self._test_env(),
                 capture_output=True,

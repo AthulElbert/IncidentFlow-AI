@@ -50,6 +50,7 @@ from app.services.triage_agent import TriageAgent
 from app.storage import atomic_write_text
 from app.tools.factory import build_toolkit
 from app.agents.investigator import Investigator
+from app.agents.verifier import Verifier
 
 app = FastAPI(title="Production Support Agent MVP", version="0.11.0")
 
@@ -161,6 +162,15 @@ investigator = Investigator(
     max_llm_steps=settings.investigation_max_llm_steps,
 )
 
+verifier = Verifier(
+    allowed_paths=[part.strip() for part in settings.code_change_allowed_paths.split(",") if part.strip()],
+    max_changed_lines=settings.code_change_max_lines,
+    deploy_wait_seconds=settings.verifier_deploy_wait_seconds,
+    poll_interval_seconds=settings.verifier_poll_interval_seconds,
+    soak_minutes=settings.verifier_soak_minutes,
+    min_improvement=settings.verifier_min_improvement,
+)
+
 scheduler_dedup_path = str(base_dir / settings.scheduler_dedup_file)
 alert_dedup_store = AlertDedupStore(file_path=scheduler_dedup_path)
 scheduler = IncidentScheduler(
@@ -210,6 +220,7 @@ logger.info(
         "code_fix_mode": settings.code_fix_mode,
         "tool_modes": tool_modes,
         "investigator_mode": settings.investigator_mode,
+        "dev_environment": tool_modes.get("deploy_target"),
         "log_level": settings.log_level,
         "storage_backend": settings.storage_backend,
         "min_confidence_for_prod": settings.min_confidence_for_prod,

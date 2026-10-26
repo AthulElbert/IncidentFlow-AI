@@ -301,6 +301,17 @@ python scripts\replay_investigations.py            # add --mode llm to use your 
 
 This is a regression check on the logic, not a measure of accuracy on real incidents: the scenarios and rules were written together. It is not yet wired into the live incident flow.
 
+## Verifier and Verification Scorecard
+
+The Verifier (`src/app/agents/verifier.py`) independently checks a proposed fix. It is deliberately not model-driven and never reads the Fixer's explanation. It recomputes what changed from the git worktree (so edits made behind the sandbox or to protected files are caught), compares that with what the Fixer claimed, then runs ordered checks: scope, syntax, the project's tests, a dev deploy, whether the alert metric actually recovered (below its threshold and improved by at least `VERIFIER_MIN_IMPROVEMENT`), and whether any other metric got worse. A change that fails an early check is never deployed. Missing data is `inconclusive`, never a pass.
+
+```powershell
+$env:PYTHONPATH = "src"
+python scripts\replay_verifications.py
+```
+
+This replays 13 good and bad fixes (a fix that does nothing, a partial fix, one that breaks another metric, a CI file edited behind the sandbox, a stray `.env`, ...) against a simulated dev environment. It is a regression check on the Verifier's logic, not proof about real fixes, and it is not yet wired into the live incident flow.
+
 ## Safety and Governance
 
 - Assistive autonomy only: no automatic approval or production promotion

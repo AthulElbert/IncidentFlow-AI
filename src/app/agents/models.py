@@ -65,6 +65,40 @@ class Hypothesis(BaseModel):
     source: Literal["evidence", "llm"] = "evidence"
 
 
+class FixProposal(BaseModel):
+    """What the Fixer hands over. The Verifier reads `branch` and `claimed_files` and ignores `rationale`:
+    an explanation of why the change should work is exactly the claim being checked."""
+
+    incident_id: str
+    branch: str
+    claimed_files: list[str] = Field(default_factory=list)
+    rationale: str = ""
+
+
+class Check(BaseModel):
+    name: str
+    status: Literal["passed", "failed", "inconclusive", "skipped"]
+    detail: str
+    required: bool = True
+    data: dict[str, Any] = Field(default_factory=dict)
+
+
+class VerificationReport(BaseModel):
+    incident_id: str
+    branch: str
+    verdict: Literal["passed", "failed", "inconclusive"]
+    checks: list[Check] = Field(default_factory=list)
+    changed_files: list[str] = Field(default_factory=list)
+    alert_metric: dict[str, float] = Field(default_factory=dict)  # before / after / threshold / improvement
+    deploy_url: str = ""
+    warnings: list[str] = Field(default_factory=list)
+    feedback_for_fixer: str = ""
+    tool_calls_used: int = 0
+
+    def check(self, name: str) -> Check | None:
+        return next((item for item in self.checks if item.name == name), None)
+
+
 class InvestigationReport(BaseModel):
     incident_id: str
     service: str

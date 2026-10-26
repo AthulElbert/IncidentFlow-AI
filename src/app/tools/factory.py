@@ -6,7 +6,8 @@ from app.config import Settings
 from app.models.schemas import IncidentRecord
 from app.services.change_control import ChangeControlStore
 from app.services.integration_factory import raise_unless_mock_fallback
-from app.tools.deploy_target import JenkinsDeployTarget, MockDeployTarget
+from app.tools.deploy_target import JenkinsDeployTarget
+from app.tools.dev_environment import MockDevEnvironment
 from app.tools.deploys import ChangeStoreDeployHistory, MockDeployHistoryTool
 from app.tools.instrumentation import Toolkit
 from app.tools.logs import FileLogsTool, MockLogsTool
@@ -49,14 +50,39 @@ def build_toolkit(
     else:
         deploys, modes["deploys"] = MockDeployHistoryTool(), "mock"
 
+    dev_env = None
     if settings.deploy_target_mode == "jenkins":
         deploy_target, modes["deploy_target"] = JenkinsDeployTarget(jenkins_client), "jenkins"
     else:
-        deploy_target = MockDeployTarget(
-            outcome=settings.mock_jenkins_outcome,
+        # The simulated dev environment is both the deploy target and its metrics, so deploying a
+        # branch changes what the Verifier later measures.
+        dev_env = MockDevEnvironment(
+            default_effect=settings.mock_dev_effect,
             polls_until_done=settings.mock_jenkins_polls_until_done,
         )
-        modes["deploy_target"] = "mock"
+        deploy_target, modes["deploy_target"] = dev_env.deploy_target, "mock"
+
+    if settings.dev_metrics_mode == "prometheus":
+        try:
+            dev_metrics = PrometheusMetricsTool(
+                base_url=settings.dev_metrics_base_url,
+                timeout_seconds=settings.metrics_timeout_seconds,
+                verify_ssl=settings.apm_verify_ssl,
+            )
+            modes["dev_metrics"] = "prometheus"
+        except Exception as exc:
+            raise_unless_mock_fallback(settings, "Dev metrics (Prometheus)", exc)
+            dev_metrics, modes["dev_metrics"] = (dev_env or MockDevEnvironment()).metrics, "mock-fallback-startup"
+    elif dev_env is not None:
+        dev_metrics, modes["dev_metrics"] = dev_env.metrics, "mock"
+    else:
+        # A real deploy target with simulated dev metrics would measure nothing real.
+        raise_unless_mock_fallback(
+            settings,
+            "Dev metrics",
+            ValueError("DEPLOY_TARGET_MODE=jenkins needs DEV_METRICS_MODE=prometheus"),
+        )
+        dev_metrics, modes["dev_metrics"] = MockDevEnvironment().metrics, "mock-fallback-startup"
 
     modes["memory"] = "lexical"
     toolkit = Toolkit(
@@ -65,6 +91,7 @@ def build_toolkit(
         deploys=deploys,
         memory=LexicalIncidentMemory(incident_records),
         deploy_target=deploy_target,
+        dev_metrics=dev_metrics,
         max_calls_per_run=settings.tool_max_calls_per_run,
     )
 
