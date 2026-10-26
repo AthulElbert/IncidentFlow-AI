@@ -288,6 +288,19 @@ $env:PYTHONPATH = "C:\Personal_projects\Agentic_AI_Projects\src"
 & "C:\Personal_projects\Agentic_AI_Projects\.venv\Scripts\python.exe" -m pytest -q tests
 ```
 
+## Investigator and Replay Scorecard
+
+`src/app/agents/` holds the Investigator: it gathers evidence through the audited tools (metric anomalies, log patterns, deploys that preceded the onset, similar past incidents), computes a confidence per issue type from how many independent signals agree, and escalates to a human when the evidence is thin, ambiguous or points nowhere. With `INVESTIGATOR_MODE=llm` a model may request a few more tool calls and writes the root-cause wording, but it never sets the confidence.
+
+Replay the built-in scenarios (mock data with known answers) against the old keyword classifier:
+
+```powershell
+$env:PYTHONPATH = "src"
+python scripts\replay_investigations.py            # add --mode llm to use your configured model
+```
+
+This is a regression check on the logic, not a measure of accuracy on real incidents: the scenarios and rules were written together. It is not yet wired into the live incident flow.
+
 ## Safety and Governance
 
 - Assistive autonomy only: no automatic approval or production promotion

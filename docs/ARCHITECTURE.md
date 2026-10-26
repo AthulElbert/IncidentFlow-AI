@@ -1,6 +1,6 @@
 # IncidentFlow-AI: Target Architecture
 
-Status: design. Phase 0 (safety and test foundation), Phase 1 (audit log, event bus, lifecycle guard, alert correlation) and Phase 2 (tool layer) are implemented; the agents and graph (Phases 3 to 7) are not. The current code is described in `README.md` and `next/README.md`.
+Status: design. Phase 0 (safety and test foundation), Phase 1 (audit log, event bus, lifecycle guard, alert correlation) and Phase 2 (tool layer) and Phase 3 (Investigator and replay harness) are implemented; the Fixer, Verifier, Critic and graph (Phases 4 to 7) are not. The current code is described in `README.md` and `next/README.md`.
 
 Implementation notes since this was written:
 - `awaiting_approval` was dropped as a state. A change is awaiting approval when it is `ready_for_prod` with status `pending_approval`; the reviewing step moves to `ready_for_prod`.
@@ -86,6 +86,15 @@ One graph run per incident, `thread_id = incident_id`, checkpointed to Postgres 
 | Critic | Everything above | read-only | `Review`: risk, blast radius, scope-creep flags, evidence-supports-claim check | Can return "send back" or "flag" |
 
 Each agent is a plain tool-calling loop over the `LLMClient` interface, with a per-agent model setting. Outputs are validated against Pydantic schemas; an invalid output counts as a failed attempt.
+
+**Investigator, as implemented (Phase 3, `src/app/agents/`):**
+- **Evidence first.** A fixed plan (`collector.py`) always runs through the audited tool proxies and produces numbered `Evidence` items (`E1`...). Tags are assigned by code from the data (`evidence.py`): a metric is anomalous by arithmetic on its points, a deploy "preceded the onset" by timestamps (within 30 minutes), a log shows a "timeout" by pattern match. Another service's evidence is kept for context but tagged `foreign` and never scored.
+- **Confidence is computed, not asked for** (`scoring.py`). Each issue type has a fixed set of expected signals (weights sum to 1) and a few contradicting ones; confidence is the weight of the signals observed minus the contradictions. It reads only evidence tags, so citing evidence or claiming certainty cannot raise it, and a hypothesis with no *specific* signal (e.g. only "no recent deploy") scores 0. `unknown` rises as the others fall, capped at 0.5.
+- **Model optional** (`INVESTIGATOR_MODE=llm`). It may make up to `INVESTIGATION_MAX_LLM_STEPS` extra evidence requests (logs, metrics, deploys, memory only, and the arguments are parsed into typed requests, never passed through) and writes the root-cause wording citing evidence ids. Invalid output, unknown evidence ids, a model error or a spent budget fall back to the evidence-based answer with a warning; a first choice that contradicts the evidence is overruled and flagged.
+- **Decision.** Escalate when the top hypothesis is `unknown`, below `INVESTIGATION_MIN_CONFIDENCE` (0.60), or within `INVESTIGATION_MIN_MARGIN` (0.10) of the runner-up; otherwise proceed.
+- **Untrusted text.** Log lines and deploy descriptions are cleaned and length-capped, sent to the model only as quoted data under a system prompt that says to ignore instructions inside them, and cannot affect confidence.
+- **Replay harness** (`src/app/replay.py`, `scripts/replay_investigations.py`): runs the seven built-in scenarios and reports accuracy against the old keyword classifier, `harmful` outcomes (proceeding with a wrong answer or where only a human could help), automation rate, unneeded escalations and root-cause keyword coverage. The scenarios and rules were written together, so this is a regression check, not an accuracy estimate for real incidents.
+- **Not yet done:** the Investigator is built at startup but not called from the live incident flow (Phase 5 wires the graph), and the LLM path has only been exercised against a scripted model.
 
 ### 4.5 Tool layer
 ```python

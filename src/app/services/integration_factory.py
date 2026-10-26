@@ -120,7 +120,9 @@ def build_llm_client(settings: Settings):
     The returned mode describes triage only: "llm" if triage uses the model,
     otherwise "heuristic" even when the client exists for code-fix.
     """
-    needs_llm = settings.triage_mode == "llm" or settings.code_fix_mode == "llm"
+    needs_llm = (
+        settings.triage_mode == "llm" or settings.code_fix_mode == "llm" or settings.investigator_mode == "llm"
+    )
     if not needs_llm:
         return None, "heuristic"
 
@@ -137,6 +139,25 @@ def build_llm_client(settings: Settings):
         return None, "heuristic-fallback-startup"
 
     return client, ("llm" if settings.triage_mode == "llm" else "heuristic")
+
+
+def build_investigator_llm(settings: Settings, shared_client):
+    """The Investigator may use its own model (INVESTIGATOR_MODEL); otherwise it shares the main client."""
+    if settings.investigator_mode != "llm":
+        return None
+    if not settings.investigator_model or settings.investigator_model == settings.llm_model:
+        return shared_client
+    try:
+        return OpenAICompatibleLLMClient(
+            base_url=settings.llm_base_url,
+            api_key=settings.llm_api_key,
+            model=settings.investigator_model,
+            timeout_seconds=settings.llm_timeout_seconds,
+            verify_ssl=settings.llm_verify_ssl,
+        )
+    except Exception as exc:
+        raise_unless_mock_fallback(settings, "Investigator LLM", exc)
+        return None
 
 
 def build_pr_client(settings: Settings):

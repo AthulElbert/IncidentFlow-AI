@@ -14,6 +14,9 @@ class LLMClient(Protocol):
     def propose_code_fix(self, file_path: str, file_content: str, instructions: str) -> dict:
         ...
 
+    def complete_json(self, messages: list[dict], error_label: str = "LLM") -> dict:
+        ...
+
 
 class OpenAICompatibleLLMClient:
     def __init__(
@@ -34,13 +37,20 @@ class OpenAICompatibleLLMClient:
             raise ValueError("LLM config is incomplete for llm mode")
 
     def _chat_json(self, system_prompt: str, user_payload: dict, error_label: str) -> dict:
-        url = f"{self.base_url}/chat/completions"
-        payload = {
-            "model": self.model,
-            "messages": [
+        return self.complete_json(
+            [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": json.dumps(user_payload)},
             ],
+            error_label=error_label,
+        )
+
+    def complete_json(self, messages: list[dict], error_label: str = "LLM") -> dict:
+        """One chat turn over an arbitrary message list; the reply must be a JSON object."""
+        url = f"{self.base_url}/chat/completions"
+        payload = {
+            "model": self.model,
+            "messages": messages,
             "temperature": 0.1,
             "response_format": {"type": "json_object"},
         }

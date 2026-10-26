@@ -5,3 +5,4 @@ __pycache__/
 eval/triage_eval_report.json
 generated_patches/
 .agent_worktrees/
+eval/investigation_report.json

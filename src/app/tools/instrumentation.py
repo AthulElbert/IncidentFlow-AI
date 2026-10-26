@@ -183,13 +183,18 @@ class ToolProxy:
 class AgentTools:
     """The tools one agent may use, as attributes: `tools.metrics.query(...)`."""
 
-    def __init__(self, agent: str, proxies: dict[str, ToolProxy]) -> None:
+    def __init__(self, agent: str, proxies: dict[str, ToolProxy], budget: ToolBudget | None = None) -> None:
         self._agent = agent
         self._proxies = proxies
+        self._budget = budget
 
     @property
     def names(self) -> list[str]:
         return sorted(self._proxies)
+
+    @property
+    def calls_used(self) -> int:
+        return self._budget.used if self._budget else 0
 
     def __getattr__(self, name: str) -> ToolProxy:
         if name.startswith("_"):
@@ -239,4 +244,4 @@ class Toolkit:
             for tool_name, methods in self.permissions[agent].items()
             if raw.get(tool_name) is not None
         }
-        return AgentTools(agent, proxies)
+        return AgentTools(agent, proxies, context.budget)

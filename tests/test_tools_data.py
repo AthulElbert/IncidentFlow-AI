@@ -174,14 +174,15 @@ def test_memory_reads_current_records_each_time():
     assert memory.search("disk full on host")[0].incident_id == "INC-N"
 
 
-def test_baseline_keyword_classifier_gets_one_scenario_wrong():
-    """Documents the weakness Phase 3 is meant to fix: 'latency' in the message wins over the real cause."""
-    got = {}
+def test_baseline_keyword_classifier_misses_the_dependency_scenarios():
+    """The weakness the Investigator addresses: 'latency' in the message wins over the real cause."""
+    wrong = set()
     for scenario in DEFAULT_SCENARIOS:
         event = APMEvent(
             service=scenario.service, metric=scenario.alert_metric, value=1, threshold=1,
             environment=scenario.environment, timestamp=ANCHOR, message=scenario.alert_message,
         )
-        got[scenario.name] = classify_issue(event)[0] == scenario.expected_issue_type
+        if classify_issue(event)[0] != scenario.expected_issue_type:
+            wrong.add(scenario.name)
 
-    assert got == {"bad_deploy_error_spike": True, "dependency_timeouts": False, "bad_config_latency": True}
+    assert wrong == {"dependency_timeouts", "red_herring_deploys"}

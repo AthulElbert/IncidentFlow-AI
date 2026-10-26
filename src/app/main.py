@@ -36,6 +36,7 @@ from app.services.dev_fix_executor import DevFixExecutor
 from app.services.integration_factory import (
     build_apm_alert_source,
     build_apm_client,
+    build_investigator_llm,
     build_jenkins_client,
     build_jira_client,
     build_llm_client,
@@ -48,6 +49,7 @@ from app.services.scheduler import AlertDedupStore, IncidentScheduler
 from app.services.triage_agent import TriageAgent
 from app.storage import atomic_write_text
 from app.tools.factory import build_toolkit
+from app.agents.investigator import Investigator
 
 app = FastAPI(title="Production Support Agent MVP", version="0.11.0")
 
@@ -152,6 +154,13 @@ toolkit, sandbox_provider, tool_modes = build_toolkit(
     base_dir=base_dir,
 )
 
+investigator = Investigator(
+    llm=build_investigator_llm(settings, llm_client),
+    min_confidence=settings.investigation_min_confidence,
+    min_margin=settings.investigation_min_margin,
+    max_llm_steps=settings.investigation_max_llm_steps,
+)
+
 scheduler_dedup_path = str(base_dir / settings.scheduler_dedup_file)
 alert_dedup_store = AlertDedupStore(file_path=scheduler_dedup_path)
 scheduler = IncidentScheduler(
@@ -200,6 +209,7 @@ logger.info(
         "code_change_mode": settings.code_change_mode,
         "code_fix_mode": settings.code_fix_mode,
         "tool_modes": tool_modes,
+        "investigator_mode": settings.investigator_mode,
         "log_level": settings.log_level,
         "storage_backend": settings.storage_backend,
         "min_confidence_for_prod": settings.min_confidence_for_prod,

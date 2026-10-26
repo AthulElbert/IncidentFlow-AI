@@ -132,6 +132,11 @@ class Settings:
     deploy_history_mode: str = "mock"
     deploy_target_mode: str = "mock"
     tool_max_calls_per_run: int = 40
+    investigator_mode: str = "heuristic"
+    investigator_model: str = ""
+    investigation_min_confidence: float = 0.60
+    investigation_min_margin: float = 0.10
+    investigation_max_llm_steps: int = 3
 
 
 _TOOL_MODES = {
@@ -139,6 +144,7 @@ _TOOL_MODES = {
     "LOGS_MODE": ("logs_mode", {"mock", "file"}),
     "DEPLOY_HISTORY_MODE": ("deploy_history_mode", {"mock", "changes"}),
     "DEPLOY_TARGET_MODE": ("deploy_target_mode", {"mock", "jenkins"}),
+    "INVESTIGATOR_MODE": ("investigator_mode", {"heuristic", "llm"}),
 }
 
 
@@ -163,6 +169,12 @@ def validate_settings(settings: "Settings") -> None:
             errors.append(f"{env_name} must be one of {sorted(allowed_modes)}, got '{value}'")
     if settings.logs_mode == "file" and not settings.logs_file_path:
         errors.append("LOGS_MODE=file requires LOGS_FILE_PATH")
+    if settings.investigator_mode == "llm" and not settings.llm_api_key:
+        errors.append("INVESTIGATOR_MODE=llm requires LLM_API_KEY")
+    if not 0.0 < settings.investigation_min_confidence <= 1.0:
+        errors.append("INVESTIGATION_MIN_CONFIDENCE must be in (0, 1]")
+    if not 0.0 <= settings.investigation_min_margin < 1.0:
+        errors.append("INVESTIGATION_MIN_MARGIN must be in [0, 1)")
 
     if settings.code_fix_mode == "llm":
         if not settings.llm_api_key:
@@ -285,4 +297,9 @@ def load_settings(base_dir: str | None = None) -> Settings:
         deploy_history_mode=os.getenv("DEPLOY_HISTORY_MODE", "mock").strip().lower(),
         deploy_target_mode=os.getenv("DEPLOY_TARGET_MODE", "mock").strip().lower(),
         tool_max_calls_per_run=_as_int(os.getenv("TOOL_MAX_CALLS_PER_RUN"), default=40),
+        investigator_mode=os.getenv("INVESTIGATOR_MODE", "heuristic").strip().lower(),
+        investigator_model=os.getenv("INVESTIGATOR_MODEL", "").strip(),
+        investigation_min_confidence=_as_float(os.getenv("INVESTIGATION_MIN_CONFIDENCE"), default=0.60),
+        investigation_min_margin=_as_float(os.getenv("INVESTIGATION_MIN_MARGIN"), default=0.10),
+        investigation_max_llm_steps=_as_int(os.getenv("INVESTIGATION_MAX_LLM_STEPS"), default=3),
     )
