@@ -1,6 +1,6 @@
 # IncidentFlow-AI: Target Architecture
 
-Status: design. Phase 0 (safety and test foundation) and Phase 1 (audit log, event bus, lifecycle guard, alert correlation) are implemented; the agent workflow (Phases 2 to 7) is not. The current code is described in `README.md` and `next/README.md`.
+Status: design. Phase 0 (safety and test foundation), Phase 1 (audit log, event bus, lifecycle guard, alert correlation) and Phase 2 (tool layer) are implemented; the agents and graph (Phases 3 to 7) are not. The current code is described in `README.md` and `next/README.md`.
 
 Implementation notes since this was written:
 - `awaiting_approval` was dropped as a state. A change is awaiting approval when it is `ready_for_prod` with status `pending_approval`; the reviewing step moves to `ready_for_prod`.
@@ -99,6 +99,13 @@ class DeployTarget(Protocol):  def deploy_dev(self, ref) -> DeployResult; def ca
 class JenkinsClient(Protocol): def trigger_dev_validation(...); def trigger_prod_deploy(...); def get_build_status(ref) -> BuildStatus
 ```
 Every tool call is logged (inputs, output hash, duration) to the audit stream.
+
+**As implemented (Phase 2, `src/app/tools/`):**
+- Interfaces: `MetricsTool` (`available_metrics`, `query`), `LogsTool` (`search`), `DeployHistoryTool` (`recent`), `IncidentMemory` (`search`), `RepoSandbox` (`list_files`, `read`, `grep`, `edit`, `diff`, `run_tests`), `DeployTarget` (`deploy_dev`, `get_status`, `canary`, `rollback`). Calls take a `TimeWindow`, not a free-form duration.
+- Backends: metrics `mock` | `prometheus` (fixed service/metric -> PromQL catalog; agents never supply PromQL); logs `mock` | `file` (JSONL); deploy history `mock` | `changes` (derived from promoted change records); memory `lexical` (TF-IDF with a same-service boost; pgvector replaces it behind the same interface); deploy target `mock` | `jenkins` (dev only).
+- Mock backends serve three deterministic incident scenarios (`tools/scenarios.py`) with known answers, which Phase 3's replay/eval harness will score against.
+- **Least privilege.** Agents never hold a raw tool. `Toolkit.for_agent(agent, ...)` returns proxies exposing only the methods in `AGENT_PERMISSIONS` (only the Fixer can `edit`; only the Verifier can `run_tests` or `deploy_dev`; nobody can `canary` or `rollback`, which belong to governance). Each call counts against a per-run budget and writes an audit entry under `agent:<name>`; denied attempts are audited too.
+- **Sandbox guardrails.** Paths are confined to the worktree (absolute paths, `..`, symlinks and Windows junctions are refused, including when listing and grepping); secrets and CI/deploy files cannot be read or edited; edits are limited to an allow-list and a line cap; tests run with a scrubbed environment so repo code never sees platform API keys.
 
 ### 4.6 Governance layer
 Owns the incident/change lifecycle (section 5), the policy gate, approval and promotion. Rules:

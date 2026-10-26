@@ -297,6 +297,7 @@ $env:PYTHONPATH = "C:\Personal_projects\Agentic_AI_Projects\src"
 - Writes are versioned per record (Postgres) and atomic (JSON)
 - Every state change is recorded in an append-only audit log (JSONL file, or a Postgres table that rejects UPDATE/DELETE) with the real actor and the before/after state; with Postgres the audit row and an `incident.events` outbox event are written in the same transaction as the change
 - State changes must follow the lifecycle table in `src/app/services/lifecycle.py`; anything else is refused
+- Agent tools (`src/app/tools/`) are least-privilege: each agent gets only the methods it needs, every call is audited and counted against a per-run budget, and the repo sandbox refuses path escapes, secrets, CI/deploy files and oversized edits
 - Related alerts (same service + environment, within `CORRELATION_WINDOW_MINUTES`) are folded into one open change instead of opening one per alert
 - Policy gate before `ready_for_prod`
 - Role-protected production promotion

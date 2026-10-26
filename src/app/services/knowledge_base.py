@@ -23,6 +23,9 @@ class IncidentKnowledgeBase:
         raw = json.loads(self.data_path.read_text(encoding="utf-8-sig"))
         return [IncidentRecord(**item) for item in raw]
 
+    def all_records(self) -> list[IncidentRecord]:
+        return list(self._records)
+
     def add_record(self, record: IncidentRecord) -> None:
         self._records.append(record)
         if self._use_postgres:

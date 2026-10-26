@@ -6,6 +6,7 @@ from pathlib import Path
 
 from app.adapters.pr_client import PRClient
 from app.models.schemas import ChangeRecord, PullRequestDraft
+from app.paths import normalize_rel_path
 from app.services.code_fix_agent import CodeFixAgent, CodeFixAttempt
 
 
@@ -615,7 +616,7 @@ class PRPreparationService:
         return False, _clip_text(proc.stderr or proc.stdout or "git worktree add failed", max_chars=220)
 
     def _validate_allowed_path(self, rel_path: str) -> tuple[bool, str]:
-        normalized = rel_path.replace("\\", "/").lstrip("./")
+        normalized = normalize_rel_path(rel_path)
         if not self.code_change_allowed_paths:
             return False, "guardrail rejected: no allowed paths configured"
         for prefix in self.code_change_allowed_paths:

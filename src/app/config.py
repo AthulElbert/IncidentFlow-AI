@@ -5,6 +5,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from app.models.schemas import UNSAFE_BUILD_STATES_FOR_PROD
+from app.paths import normalize_rel_path
 
 
 def _as_bool(value: str | None, default: bool = False) -> bool:
@@ -123,6 +124,22 @@ class Settings:
     mock_jenkins_outcome: str = "success"
     mock_jenkins_polls_until_done: int = 1
     correlation_window_minutes: float = 15.0
+    metrics_mode: str = "mock"
+    metrics_base_url: str = "http://localhost:9090"
+    metrics_timeout_seconds: int = 10
+    logs_mode: str = "mock"
+    logs_file_path: str = ""
+    deploy_history_mode: str = "mock"
+    deploy_target_mode: str = "mock"
+    tool_max_calls_per_run: int = 40
+
+
+_TOOL_MODES = {
+    "METRICS_MODE": ("metrics_mode", {"mock", "prometheus"}),
+    "LOGS_MODE": ("logs_mode", {"mock", "file"}),
+    "DEPLOY_HISTORY_MODE": ("deploy_history_mode", {"mock", "changes"}),
+    "DEPLOY_TARGET_MODE": ("deploy_target_mode", {"mock", "jenkins"}),
+}
 
 
 class ConfigError(ValueError):
@@ -140,11 +157,18 @@ def validate_settings(settings: "Settings") -> None:
             f"ALLOWED_JENKINS_STATES_FOR_PROD must only contain terminal success states, got {unsafe_states}"
         )
 
+    for env_name, (attribute, allowed_modes) in _TOOL_MODES.items():
+        value = getattr(settings, attribute)
+        if value not in allowed_modes:
+            errors.append(f"{env_name} must be one of {sorted(allowed_modes)}, got '{value}'")
+    if settings.logs_mode == "file" and not settings.logs_file_path:
+        errors.append("LOGS_MODE=file requires LOGS_FILE_PATH")
+
     if settings.code_fix_mode == "llm":
         if not settings.llm_api_key:
             errors.append("CODE_FIX_MODE=llm requires LLM_API_KEY")
         if settings.code_change_mode == "sandbox_git":
-            target = settings.code_fix_target_path.replace("\\", "/").lstrip("./")
+            target = normalize_rel_path(settings.code_fix_target_path)
             allowed = [
                 part.strip().replace("\\", "/").rstrip("/")
                 for part in settings.code_change_allowed_paths.split(",")
@@ -253,4 +277,12 @@ def load_settings(base_dir: str | None = None) -> Settings:
         mock_jenkins_outcome=os.getenv("MOCK_JENKINS_OUTCOME", "success").strip().lower(),
         mock_jenkins_polls_until_done=_as_int(os.getenv("MOCK_JENKINS_POLLS"), default=1),
         correlation_window_minutes=_as_float(os.getenv("CORRELATION_WINDOW_MINUTES"), default=15.0),
+        metrics_mode=os.getenv("METRICS_MODE", "mock").strip().lower(),
+        metrics_base_url=os.getenv("METRICS_BASE_URL", "http://localhost:9090").strip(),
+        metrics_timeout_seconds=_as_int(os.getenv("METRICS_TIMEOUT_SECONDS"), default=10),
+        logs_mode=os.getenv("LOGS_MODE", "mock").strip().lower(),
+        logs_file_path=os.getenv("LOGS_FILE_PATH", "").strip(),
+        deploy_history_mode=os.getenv("DEPLOY_HISTORY_MODE", "mock").strip().lower(),
+        deploy_target_mode=os.getenv("DEPLOY_TARGET_MODE", "mock").strip().lower(),
+        tool_max_calls_per_run=_as_int(os.getenv("TOOL_MAX_CALLS_PER_RUN"), default=40),
     )

@@ -47,6 +47,7 @@ from app.services.pr_preparer import PRPreparationService
 from app.services.scheduler import AlertDedupStore, IncidentScheduler
 from app.services.triage_agent import TriageAgent
 from app.storage import atomic_write_text
+from app.tools.factory import build_toolkit
 
 app = FastAPI(title="Production Support Agent MVP", version="0.11.0")
 
@@ -141,6 +142,16 @@ pipeline = SupportAgentPipeline(
     database_url=settings.database_url,
 )
 
+# The tool layer the agent workflow will use (Phases 3+). Built now so a bad tool
+# configuration fails at startup rather than in the middle of an incident.
+toolkit, sandbox_provider, tool_modes = build_toolkit(
+    settings,
+    change_store=change_store,
+    incident_records=pipeline.kb.all_records,
+    jenkins_client=jenkins_client,
+    base_dir=base_dir,
+)
+
 scheduler_dedup_path = str(base_dir / settings.scheduler_dedup_file)
 alert_dedup_store = AlertDedupStore(file_path=scheduler_dedup_path)
 scheduler = IncidentScheduler(
@@ -188,6 +199,7 @@ logger.info(
         "pr_local_branch_mode": settings.pr_local_branch_mode,
         "code_change_mode": settings.code_change_mode,
         "code_fix_mode": settings.code_fix_mode,
+        "tool_modes": tool_modes,
         "log_level": settings.log_level,
         "storage_backend": settings.storage_backend,
         "min_confidence_for_prod": settings.min_confidence_for_prod,

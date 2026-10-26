@@ -13,7 +13,7 @@ class IntegrationConfigError(ValueError):
     """A client configured for a real backend could not be started."""
 
 
-def _raise_unless_mock_fallback(settings: Settings, component: str, exc: Exception) -> None:
+def raise_unless_mock_fallback(settings: Settings, component: str, exc: Exception) -> None:
     """Real mode must not quietly degrade to a simulator.
 
     ALLOW_MOCK_FALLBACK=true is the explicit, demo-only opt-in.
@@ -46,7 +46,7 @@ def build_jira_client(settings: Settings):
                 api_token=settings.jira_api_token,
             ), "real"
         except Exception as exc:
-            _raise_unless_mock_fallback(settings, "Jira", exc)
+            raise_unless_mock_fallback(settings, "Jira", exc)
             return MockJiraClient(project_key=settings.jira_project_key), "mock-fallback-startup"
 
     return MockJiraClient(project_key=settings.jira_project_key), "mock"
@@ -64,7 +64,7 @@ def build_jenkins_client(settings: Settings):
                 verify_ssl=settings.jenkins_verify_ssl,
             ), "real"
         except Exception as exc:
-            _raise_unless_mock_fallback(settings, "Jenkins", exc)
+            raise_unless_mock_fallback(settings, "Jenkins", exc)
             return _mock_jenkins(settings), "mock-fallback-startup"
 
     return _mock_jenkins(settings), "mock"
@@ -79,7 +79,7 @@ def build_apm_client(settings: Settings):
                 verify_ssl=settings.apm_verify_ssl,
             ), "http"
         except Exception as exc:
-            _raise_unless_mock_fallback(settings, "APM evidence client", exc)
+            raise_unless_mock_fallback(settings, "APM evidence client", exc)
             return MockAPMClient(), "mock-fallback-startup"
 
     return MockAPMClient(), "mock"
@@ -97,7 +97,7 @@ def build_apm_alert_source(settings: Settings, base_dir: str):
                 verify_ssl=settings.apm_verify_ssl,
             ), "dynatrace"
         except Exception as exc:
-            _raise_unless_mock_fallback(settings, "Dynatrace alert source", exc)
+            raise_unless_mock_fallback(settings, "Dynatrace alert source", exc)
             return MockAPMAlertSource(queue_file=queue_path), "mock-fallback-startup"
 
     if settings.apm_alerts_mode == "http":
@@ -108,7 +108,7 @@ def build_apm_alert_source(settings: Settings, base_dir: str):
                 verify_ssl=settings.apm_verify_ssl,
             ), "http"
         except Exception as exc:
-            _raise_unless_mock_fallback(settings, "HTTP alert source", exc)
+            raise_unless_mock_fallback(settings, "HTTP alert source", exc)
             return MockAPMAlertSource(queue_file=queue_path), "mock-fallback-startup"
 
     return MockAPMAlertSource(queue_file=queue_path), "mock"
@@ -133,7 +133,7 @@ def build_llm_client(settings: Settings):
             verify_ssl=settings.llm_verify_ssl,
         )
     except Exception as exc:
-        _raise_unless_mock_fallback(settings, "LLM client", exc)
+        raise_unless_mock_fallback(settings, "LLM client", exc)
         return None, "heuristic-fallback-startup"
 
     return client, ("llm" if settings.triage_mode == "llm" else "heuristic")
@@ -148,7 +148,7 @@ def build_pr_client(settings: Settings):
                 api_base_url=settings.pr_github_api_base_url,
             ), "github"
         except Exception as exc:
-            _raise_unless_mock_fallback(settings, "GitHub PR client", exc)
+            raise_unless_mock_fallback(settings, "GitHub PR client", exc)
             return MockPRClient(repo_slug=settings.pr_repo_slug), "mock-fallback-startup"
 
     return MockPRClient(repo_slug=settings.pr_repo_slug), "mock"
