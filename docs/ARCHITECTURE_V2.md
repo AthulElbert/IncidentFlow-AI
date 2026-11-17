@@ -1,6 +1,6 @@
 # IncidentFlow-AI: architecture v2 (design)
 
-Status: **design. Workstream E (LLM routing and usage) is implemented; see section 7.3. The rest is not.** It extends `docs/ARCHITECTURE.md` (Phases 0 to 7, implemented). Where this document names a third-party API (MCP SDK, LangGraph checkpointers, pgvector, OPA) it is written from general knowledge and each is listed in section 12 to be verified against current documentation before coding.
+Status: **design. Workstreams E (LLM routing, section 7.3) and D (durable runs, section 6.6) are implemented. The rest is not.** It extends `docs/ARCHITECTURE.md` (Phases 0 to 7, implemented). Where this document names a third-party API (MCP SDK, LangGraph checkpointers, pgvector, OPA) it is written from general knowledge and each is listed in section 12 to be verified against current documentation before coding.
 
 ## 1. Scope
 
@@ -238,6 +238,17 @@ Phase 1 is single-instance: at startup, runs with a checkpoint are resumed, runs
 
 Shadow runs stay non-resumable (they are marked interrupted, as now).
 
+### 6.6 As implemented (step 8.3: `agents/checkpoint.py`, `agents/runner.py`, `agents/graph.py`)
+
+- **Checkpointer selection.** `CHECKPOINT_BACKEND=memory|sqlite|postgres` (default `memory`). SQLite writes `agent_checkpoints.sqlite` in the data directory (or `CHECKPOINT_SQLITE_FILE`); Postgres uses `DATABASE_URL`. Packages: `langgraph-checkpoint-sqlite`, `langgraph-checkpoint-postgres`. Before building on them I checked the installed LangGraph's behaviour with a probe: a stage that dies leaves itself as `next`, and `invoke(None, config)` re-runs it from the last saved state.
+- **Resume at startup.** `AgentRunner.recover()` replaces the old blanket escalation. A `running` change with saved progress is resumed in the background; one without (memory checkpointer, or never saved) is escalated with the reason; shadow runs are always closed, never resumed. `agent.resumed` is audited and shown in the timeline.
+- **The attempt is the unit of resumption, enforced in the graph.** `verify`, `review` and `package` first check that this process opened the change's worktree. If not, they return to `fix` with the same attempt number and feedback and drop that attempt's half-recorded entry, so the attempt is recorded once. A resumed `fix` resets the worktree first. Nothing an interrupted attempt left on disk is ever verified, reviewed or offered for approval. Completed earlier stages, such as the investigation, are kept.
+- **Crash-loop guard.** `AGENT_RUN_MAX_RESUMES` (default 2) is counted on the change (`agent_run.resumes`); past it, startup escalates with the reason. The budget used so far is saved with every stage (`budget_used`) and restored on resume, so a restart cannot reset the run's limits.
+- **Saved progress is deleted when a run ends** (ready or escalated) and kept while it is `running`.
+- **Verified** by 19 tests that kill the run inside each stage (investigate, mid-fix with a half-made edit on disk, verify, review, package) and resume it in a fresh process over the same checkpoint file and store. Removing the attempt guard or the budget carry-over makes the matching tests fail. Also verified for real: the app was force-killed while the Fixer was waiting on a model, restarted on the same data, resumed the run, redid attempt 1 from clean code, and produced a verified fix ready for approval.
+- **Known gap: carried-over usage is as of the last completed stage.** What an interrupted stage had spent before the crash (its model calls, tool calls, tokens and time) is not counted, because usage is saved only when a stage completes. In the real crash test the resumed run reported 3 model calls where 4 had been made. The resume cap bounds the loss to one stage's spending per resume. Saving usage on every model call would close it.
+- **Not verified:** the Postgres checkpointer (no database running here). **Not done:** multi-instance leases (section 6.5); a resumed run counts the downtime between crash and restart as elapsed time only up to the last saved stage.
+
 ## 7. Workstream E: LLM routing and usage
 
 ### 7.1 Today
@@ -350,7 +361,7 @@ Gate 0  Run a real model through the existing system (prerequisite, not a build 
 | 8.0 | Real model run, prompt tuning, record what actually broke | S (time depends on prompts) |
 | 8.1 | E: router, retries, usage, token/cost budget | M, **done** |
 | 8.2 | F 8.4: container sandbox and the host-execution rule | M |
-| 8.3 | D: checkpointer, attempt-level resume, crash-loop guard | M |
+| 8.3 | D: checkpointer, attempt-level resume, crash-loop guard | M, **done** |
 | 8.4 | B: registry, gap-driven follow-ups, re-diagnose edge | M |
 | 8.5 | A: MCP manager, manifest, Prometheus and GitHub backends, then Kubernetes evidence | L |
 | 8.6 | C: schema, indexer, hybrid search, finalised postmortems, retrieval eval | L |

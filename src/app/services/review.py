@@ -41,6 +41,7 @@ ACTION_LABELS = {
     "agent.escalated": "Handed to a person",
     "agent.ready_for_approval": "Verified fix ready for approval",
     "agent.interrupted": "Run interrupted by a restart",
+    "agent.resumed": "Run resumed after a restart",
     "agent.failed": "Run failed unexpectedly",
     "agent.ready": "A verified fix would be ready for approval",
     "dev.recorded": "Dev validation recorded",

@@ -161,6 +161,9 @@ class Settings:
     agent_run_max_tokens: int = 600_000
     agent_run_max_cost: float = 0.0
     llm_routing_file: str = ""
+    checkpoint_backend: str = "memory"
+    checkpoint_sqlite_file: str = ""
+    agent_run_max_resumes: int = 2
     llm_max_retries: int = 2
 
 
@@ -175,6 +178,7 @@ _TOOL_MODES = {
     "CRITIC_MODE": ("critic_mode", {"rules", "llm"}),
     "AGENT_RUN_MODE": ("agent_run_mode", {"off", "manual", "auto", "shadow"}),
     "EVENT_BUS_MODE": ("event_bus_mode", {"auto", "kafka"}),
+    "CHECKPOINT_BACKEND": ("checkpoint_backend", {"memory", "sqlite", "postgres"}),
     "MOCK_DEV_EFFECT": ("mock_dev_effect", {"resolves", "no_effect", "partial", "regresses_other", "deploy_fails"}),
 }
 
@@ -252,6 +256,10 @@ def validate_settings(settings: "Settings") -> None:
             load_routing_file(routing_file_path(settings), os.environ, settings.llm_max_retries)
         except ValueError as exc:
             errors.append(f"LLM_ROUTING_FILE: {exc}")
+    if settings.checkpoint_backend == "postgres" and not settings.database_url:
+        errors.append("CHECKPOINT_BACKEND=postgres requires DATABASE_URL")
+    if not 0 <= settings.agent_run_max_resumes <= 5:
+        errors.append("AGENT_RUN_MAX_RESUMES must be between 0 and 5")
     if not 0 <= settings.llm_max_retries <= 5:
         errors.append("LLM_MAX_RETRIES must be between 0 and 5")
     if settings.agent_run_max_tokens < 0 or settings.agent_run_max_cost < 0:
@@ -434,5 +442,8 @@ def load_settings(base_dir: str | None = None) -> Settings:
         agent_run_max_tokens=_as_int(os.getenv("AGENT_RUN_MAX_TOKENS"), default=600_000),
         agent_run_max_cost=_as_float(os.getenv("AGENT_RUN_MAX_COST"), default=0.0),
         llm_routing_file=os.getenv("LLM_ROUTING_FILE", "").strip(),
+        checkpoint_backend=os.getenv("CHECKPOINT_BACKEND", "memory").strip().lower(),
+        checkpoint_sqlite_file=os.getenv("CHECKPOINT_SQLITE_FILE", "").strip(),
+        agent_run_max_resumes=_as_int(os.getenv("AGENT_RUN_MAX_RESUMES"), default=2),
         llm_max_retries=_as_int(os.getenv("LLM_MAX_RETRIES"), default=2),
     )

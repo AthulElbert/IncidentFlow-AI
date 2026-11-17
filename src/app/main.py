@@ -63,6 +63,7 @@ from app.replay import event_for
 from app.tools.factory import build_toolkit
 from app.tools.scenarios import DEFAULT_SCENARIOS
 from app.agents.budget import BudgetLimits
+from app.agents.checkpoint import build_checkpointing
 from app.agents.critic import Critic
 from app.agents.graph import AgentRuntime
 from app.agents.fixer import Fixer
@@ -228,9 +229,22 @@ agent_runtime = AgentRuntime(
         max_cost=settings.agent_run_max_cost,
     ),
 )
-agent_runner = AgentRunner(agent_runtime, workers=settings.agent_run_workers)
-# A restart ends any run that was in flight; make that visible instead of leaving it "running".
-change_store.recover_interrupted_runs()
+checkpointing = build_checkpointing(
+    settings.checkpoint_backend,
+    sqlite_file=settings.checkpoint_sqlite_file or (data_dir / "agent_checkpoints.sqlite"),
+    database_url=settings.database_url,
+)
+agent_runner = AgentRunner(
+    agent_runtime,
+    workers=settings.agent_run_workers,
+    checkpointer=checkpointing.saver,
+    max_resumes=settings.agent_run_max_resumes,
+)
+# A restart interrupts any run that was in flight. With a durable checkpointer it is resumed from its last
+# completed stage; otherwise (and for shadow runs) it is escalated, so nothing is left looking "running".
+run_recovery = agent_runner.recover()
+if run_recovery["resumed"] or run_recovery["escalated"]:
+    logger.info("agent-runs-recovered", extra=run_recovery)
 
 # What happened to a change becomes what incident memory knows. The sweep covers events the bus lost in a restart.
 outcome_learner = OutcomeLearner(change_store, pipeline.kb, consumer_bus)
@@ -321,6 +335,7 @@ async def _lifespan(_: FastAPI):
     learning_loop.stop()
     scheduler.stop()
     agent_runner.shutdown()
+    checkpointing.close()
 
 
 app.router.lifespan_context = _lifespan

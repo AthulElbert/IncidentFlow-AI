@@ -70,6 +70,7 @@ class RunState(TypedDict, total=False):
     next_step: str
     outcome: str
     crashed: str
+    budget_used: dict  # saved with every stage so a resumed run keeps counting from where it was
 
 
 def branch_for(change_id: str, service: str, namespace: str = "agent-fix") -> str:
@@ -96,6 +97,7 @@ class AgentRuntime:
     budget_limits: BudgetLimits = field(default_factory=BudgetLimits)
     _sandboxes: dict[str, FileSandbox] = field(default_factory=dict)
     _budgets: dict[str, RunBudget] = field(default_factory=dict)
+    _resumed: set[str] = field(default_factory=set)
 
     def budget_for(self, change_id: str) -> RunBudget:
         if change_id not in self._budgets:
@@ -107,9 +109,22 @@ class AgentRuntime:
             self._sandboxes[change_id] = self.sandbox_provider.open(branch)
         return self._sandboxes[change_id]
 
+    def has_sandbox(self, change_id: str) -> bool:
+        """Whether this process opened the change's worktree. False after a restart: its contents cannot be trusted."""
+        return change_id in self._sandboxes
+
+    def mark_resumed(self, change_id: str, budget_used: dict | None) -> None:
+        """A run is being picked up after a restart: carry over what it had used, and start its worktree clean."""
+        self._budgets[change_id] = RunBudget(self.budget_limits, carried=budget_used)
+        self._resumed.add(change_id)
+
+    def is_resumed(self, change_id: str) -> bool:
+        return change_id in self._resumed
+
     def release(self, change_id: str) -> None:
         self._sandboxes.pop(change_id, None)
         self._budgets.pop(change_id, None)
+        self._resumed.discard(change_id)
 
 
 def _short_checks(report: dict) -> list[dict]:
@@ -159,13 +174,15 @@ def build_incident_graph(runtime: AgentRuntime, checkpointer: Any | None = None)
                 # A finished, reviewed fix is not thrown away because the clock ran out while packaging it.
                 limit = None if name == "package" else runtime.budget_for(state["change_id"]).exceeded()
                 if limit:
-                    return escalate(state, ORCHESTRATOR, f"run budget exceeded: {limit}")
-                # Model calls made inside this node are counted against the run and written to the audit log.
-                with llm_task(sink=usage_sink(state["change_id"], name), attempt=int(state.get("attempt", 1))):
-                    return node(state)
+                    result = escalate(state, ORCHESTRATOR, f"run budget exceeded: {limit}")
+                else:
+                    # Model calls made inside this node are counted against the run and written to the audit log.
+                    with llm_task(sink=usage_sink(state["change_id"], name), attempt=int(state.get("attempt", 1))):
+                        result = node(state)
             except Exception as exc:  # never leave the change stuck in a working state
                 logger.exception("agent-node-crashed", extra={"node": name, "change_id": state.get("change_id")})
-                return {"crashed": f"{name}: {type(exc).__name__}: {exc}"[:300]}
+                result = {"crashed": f"{name}: {type(exc).__name__}: {exc}"[:300]}
+            return {**result, "budget_used": runtime.budget_for(state["change_id"]).snapshot()}
 
         return run
 
@@ -201,9 +218,12 @@ def build_incident_graph(runtime: AgentRuntime, checkpointer: Any | None = None)
         ctx = IncidentContext(**state["ctx"])
         investigation = InvestigationReport(**state["investigation"])
         # A worktree (a real git branch) is only created when the Fixer can use one.
+        fresh = not runtime.has_sandbox(change_id)
         sandbox = runtime.sandbox_for(change_id, state["branch"]) if runtime.fixer.llm is not None else None
-        if sandbox is not None and attempt > 1:
-            sandbox.reset()  # every attempt starts from the original code, with the feedback in hand
+        if sandbox is not None and (attempt > 1 or (fresh and runtime.is_resumed(change_id))):
+            # Every attempt starts from the original code, with the feedback in hand. So does a resumed one:
+            # whatever an interrupted attempt left in the worktree is not something anyone verified.
+            sandbox.reset()
 
         store.record_agent_step(
             change_id, ORCHESTRATOR, "fixing", "agent.fixing", {"attempts": state.get("attempts", [])}, note=f"attempt {attempt}"
@@ -232,7 +252,21 @@ def build_incident_graph(runtime: AgentRuntime, checkpointer: Any | None = None)
             }
         return {"attempts": attempts, "proposal": result.proposal.model_dump(mode="json"), "next_step": "verify"}
 
+    def redo_attempt(state: RunState) -> dict | None:
+        """After a restart the worktree this stage would check was not produced in this process. Redo the attempt.
+
+        The proposal in the saved state describes edits that may no longer be on disk, so verifying or reviewing
+        now could pass or fail for the wrong reason. Going back to `fix` (same attempt number, same feedback)
+        costs a model call and removes the doubt.
+        """
+        if runtime.has_sandbox(state["change_id"]):
+            return None
+        return {"attempts": list(state.get("attempts", []))[:-1], "next_step": "redo"}
+
     def verify(state: RunState) -> dict:
+        redo = redo_attempt(state)
+        if redo:
+            return redo
         change_id, attempt = state["change_id"], state["attempt"]
         ctx = IncidentContext(**state["ctx"])
         investigation = InvestigationReport(**state["investigation"])
@@ -266,6 +300,9 @@ def build_incident_graph(runtime: AgentRuntime, checkpointer: Any | None = None)
         return {"verification": dump, "attempts": attempts, **escalate(state, "agent:verifier", reason, patch)}
 
     def review(state: RunState) -> dict:
+        redo = redo_attempt(state)
+        if redo:
+            return redo
         change_id, attempt = state["change_id"], state["attempt"]
         ctx = IncidentContext(**state["ctx"])
         investigation = InvestigationReport(**state["investigation"])
@@ -306,6 +343,10 @@ def build_incident_graph(runtime: AgentRuntime, checkpointer: Any | None = None)
         return {"attempt": state["attempt"] + 1, "next_step": "fix"}
 
     def package(state: RunState) -> dict:
+        # The diff a person approves must come from a worktree this process fixed and verified.
+        redo = redo_attempt(state)
+        if redo:
+            return redo
         verification = VerificationReport(**state["verification"])
         review_ = state["review"]
         improvement = float(verification.alert_metric.get("improvement", 0.0))
@@ -356,9 +397,13 @@ def build_incident_graph(runtime: AgentRuntime, checkpointer: Any | None = None)
     graph.set_entry_point("investigate")
     graph.add_conditional_edges("investigate", route, {"fix": "fix", "end": END, "crash": "crash"})
     graph.add_conditional_edges("fix", route, {"verify": "verify", "end": END, "crash": "crash"})
-    graph.add_conditional_edges("verify", route, {"review": "review", "retry": "retry", "end": END, "crash": "crash"})
-    graph.add_conditional_edges("review", route, {"package": "package", "retry": "retry", "end": END, "crash": "crash"})
+    graph.add_conditional_edges(
+        "verify", route, {"review": "review", "retry": "retry", "redo": "fix", "end": END, "crash": "crash"}
+    )
+    graph.add_conditional_edges(
+        "review", route, {"package": "package", "retry": "retry", "redo": "fix", "end": END, "crash": "crash"}
+    )
     graph.add_edge("retry", "fix")
-    graph.add_conditional_edges("package", route, {"end": END, "crash": "crash"})
+    graph.add_conditional_edges("package", route, {"redo": "fix", "end": END, "crash": "crash"})
     graph.add_edge("crash", END)
     return graph.compile(checkpointer=checkpointer or MemorySaver())

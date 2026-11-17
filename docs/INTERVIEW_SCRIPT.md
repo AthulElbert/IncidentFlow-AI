@@ -95,7 +95,7 @@ Format: **Q**, the answer, then **Follow-ups**.
 > "The loop is a cycle with model-driven branching and retries, which LangGraph models directly. A workflow engine like Camunda is built for deterministic business processes. Bedrock would tie me to one cloud and one model, and I wanted the control logic to be mine. And I kept governance outside the graph on purpose, so swapping the orchestrator wouldn't touch the safety rules."
 
 - *Follow-up: Is LangGraph doing anything you couldn't do with a loop?* "No. A while loop would work. LangGraph gives me explicit state, conditional routing and a place to add checkpointing, and it reads clearly. I'd say that plainly; I'm not selling the library."
-- *Follow-up: What about its checkpointing?* "Honest answer: I used the in-memory checkpointer. Results are saved on the change record, and a restart escalates interrupted runs, but a run can't resume mid-flight. A Postgres checkpointer is the fix and I haven't done it."
+- *Follow-up: What about its checkpointing?* "Progress is saved after every stage, in SQLite or Postgres. On restart an interrupted run resumes, but the unit of resumption is the fix attempt: if it died after the fix, it redoes that attempt from clean code, because I won't verify a worktree this process didn't produce. Resumes are capped and the budget carries over. I tested it by force-killing the app mid-fix and restarting it. The Postgres checkpointer hasn't met a real database, and usage from the stage that was interrupted isn't counted."
 
 **Q: What's the data model? How is state stored?**
 > "One change record per incident, stored as JSON or Postgres JSONB behind the same interface. Every record has a version number; writes are conditional on it. Alongside are an append-only audit log, an event bus, and an incident memory store."
@@ -161,7 +161,7 @@ Format: **Q**, the answer, then **Follow-ups**.
 > "An event can arrive twice, so a consumer must give the same result the second time. My outcome learner checks whether the incident is still open before updating it, and it also sweeps the change store at startup, since the in-memory bus doesn't survive a restart."
 
 **Q: What happens when the app restarts mid-run?**
-> "Any run left in 'running' is escalated at startup with a clear reason, so nothing is left stuck. It can't resume mid-flight, because I used an in-memory checkpointer."
+> "With a durable checkpointer it resumes from the last completed stage, redoing the interrupted fix attempt from clean code, at most twice. Without one, or past the cap, it's escalated at startup with the reason, so nothing is left looking 'running'."
 
 ### F. Eventing and Kafka
 
@@ -283,7 +283,7 @@ Run with `AGENT_RUN_MODE=manual` and the local stand-in model. Narrate what each
 - **No real LLM has been run through it.** Scripted model and a local stand-in server only.
 - **Kafka only against an in-memory stand-in.**
 - **Real Postgres tests haven't been run** (gated, and I haven't had a database up).
-- **Run state in flight is in memory;** a restart escalates interrupted runs.
+- **Durable runs only tested with SQLite;** the Postgres checkpointer hasn't met a real database, and usage spent by an interrupted stage isn't counted after a resume.
 - **No background Jenkins polling;** promotions need a manual refresh.
 - **No automatic post-release monitoring or rollback.**
 - **No JavaScript tests;** auth is API-key/JWT, not SSO; agents are not containerised.

@@ -103,7 +103,7 @@ Being upfront here is a strength. Don't wait to be caught.
 
 - **No real LLM has been run through it.** Everything model-driven was tested with a scripted model and a local stand-in server. I expect prompt tuning to be the biggest remaining unknown.
 - **Kafka has only been tested against an in-memory stand-in**, not a real broker.
-- **In-flight agent state is in memory.** Results are saved on the change, and a restart escalates interrupted runs, but a run can't resume mid-flight.
+- **Durable runs are tested with SQLite only.** An interrupted run resumes after a restart (tested by force-killing the app), but the Postgres checkpointer hasn't met a real database.
 - **Nothing polls Jenkins in the background,** so a promotion needs a manual status refresh.
 - **It's demo-level.** The architecture is built for a real environment (Prometheus, Loki, Jenkins, Postgres, Kafka are all interfaces), but I implemented mock and local backends.
 

@@ -455,6 +455,20 @@ class ChangeControlStore:
 
         return self._mutate(change_id, apply, action="agent.ready_for_approval", actor=actor)
 
+    def note_agent_resume(self, change_id: str, actor: str, max_resumes: int) -> ChangeRecord:
+        """Record that an interrupted run is being resumed. Refuses once it has been resumed `max_resumes` times."""
+
+        def apply(record: ChangeRecord) -> ChangeRecord:
+            if record.agent_run_status != "running":
+                raise ValueError("No agent run is in progress for this change")
+            resumes = int(record.agent_run.get("resumes", 0))
+            if resumes >= max_resumes:
+                raise ValueError(f"it was already resumed {resumes} time(s), the limit")
+            return record.model_copy(update={"agent_run": {**record.agent_run, "resumes": resumes + 1}})
+
+        updated = self._mutate(change_id, apply, action="agent.resumed", actor=actor)
+        return updated
+
     # ---- shadow runs: the same agents, observing only. Nothing here moves the change's state. ----
 
     def begin_shadow_run(self, change_id: str, actor: str) -> ChangeRecord:
@@ -505,9 +519,13 @@ class ChangeControlStore:
 
         return self._mutate(change_id, apply, action="shadow.ready", actor=actor)
 
-    def recover_interrupted_runs(self, actor: str = "system") -> list[str]:
-        """After a restart no run is still going: escalate any that were left `running`."""
+    def recover_interrupted_runs(self, actor: str = "system", skip: set[str] | None = None) -> list[str]:
+        """After a restart no run is still going: escalate any that were left `running`.
+
+        `skip` names changes whose real run is being resumed instead; their shadow runs are still closed.
+        """
         recovered: list[str] = []
+        resumed = skip or set()
         for record in self.list_changes():
             if record.shadow.get("status") == "running":
                 try:
@@ -518,7 +536,7 @@ class ChangeControlStore:
                     recovered.append(record.change_id)
                 except ValueError:
                     pass
-            if record.agent_run_status != "running":
+            if record.agent_run_status != "running" or record.change_id in resumed:
                 continue
             try:
                 self.record_agent_step(

@@ -395,7 +395,7 @@ Try it without a real alert: `GET /v1/scenarios` lists simulated incidents and `
 Notes:
 - With `FIXER_MODE=off` (default) a run investigates, writes its diagnosis on the change, then escalates; it never invents a change. Set `FIXER_MODE=llm` and an `LLM_API_KEY` to let it propose fixes.
 - Each run works on its own branch, `agent-fix/<change>-<service>`, in a disposable git worktree under `.agent_worktrees/`. Worktrees are kept after a run so you can inspect them; they are git-ignored.
-- In-flight run state is held in memory. Results are saved on the change, and a restart escalates any run it interrupted.
+- By default in-flight run state is held in memory and a restart escalates any run it interrupted. Set `CHECKPOINT_BACKEND=sqlite` (or `postgres`) to save progress after every stage: on restart an interrupted run is resumed, redoing the interrupted fix attempt from clean code, at most `AGENT_RUN_MAX_RESUMES` times (default 2), with its budget carried over.
 
 
 ## Safety and Governance

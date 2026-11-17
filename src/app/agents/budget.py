@@ -31,15 +31,30 @@ class BudgetLimits:
 
 
 class RunBudget:
-    def __init__(self, limits: BudgetLimits, clock: Callable[[], float] = time.monotonic) -> None:
+    def __init__(
+        self, limits: BudgetLimits, clock: Callable[[], float] = time.monotonic, carried: dict | None = None
+    ) -> None:
+        """`carried` is what an interrupted run had already used (see `snapshot`), so a restart cannot reset it."""
+        used = carried or {}
         self.limits = limits
         self._clock = clock
-        self._started = clock()
+        self._started = clock() - float(used.get("seconds", 0.0))
         self.tool_calls = ToolBudget(limits.max_tool_calls)
-        self._llm_calls = 0
-        self._tokens = 0
-        self._cost = 0.0
+        self.tool_calls.used = int(used.get("tool_calls", 0))
+        self._llm_calls = int(used.get("llm_calls", 0))
+        self._tokens = int(used.get("tokens", 0))
+        self._cost = float(used.get("cost", 0.0))
         self._lock = threading.Lock()
+
+    def snapshot(self) -> dict:
+        """What the run has used so far, small enough to save with each stage."""
+        return {
+            "seconds": round(self.elapsed, 3),
+            "tool_calls": self.tool_calls.used,
+            "llm_calls": self._llm_calls,
+            "tokens": self._tokens,
+            "cost": self.cost,
+        }
 
     @property
     def elapsed(self) -> float:
