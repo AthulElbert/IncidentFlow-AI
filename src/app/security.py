@@ -58,9 +58,11 @@ def principal_from_claims(claims: dict, source: str, actor_claim: str, roles_cla
 class OidcVerifier:
     """Checks tokens from an OpenID Connect provider: signature against its JWKS, issuer, audience, expiry.
 
-    The JWKS location comes from OIDC_JWKS_URL or the issuer's discovery document. Keys are cached; a token signed
-    with a key id not in the cache makes one refetch (key rotation). Symmetric algorithms are never accepted, so a
-    token cannot be signed with the public key as an HMAC secret.
+    The JWKS location comes from OIDC_JWKS_URL or the issuer's discovery document. Keys are cached for five minutes;
+    a token signed with a key id not in the cache makes one refetch (key rotation), at most once per
+    `refresh_cooldown_seconds`, so tokens with made-up key ids cannot make every request call the provider. A newly
+    rotated key may therefore be refused for up to that long. Symmetric algorithms are never accepted, so a token
+    cannot be signed with the public key as an HMAC secret.
     """
 
     def __init__(
@@ -74,6 +76,7 @@ class OidcVerifier:
         teams_claim: str = "groups",
         leeway_seconds: int = 30,
         timeout_seconds: int = 5,
+        refresh_cooldown_seconds: float = 30,
     ) -> None:
         unsafe = set(algorithms) - OIDC_ALGORITHMS
         if unsafe or not algorithms:
@@ -86,6 +89,7 @@ class OidcVerifier:
         self.actor_claim, self.roles_claim, self.teams_claim = actor_claim, roles_claim, teams_claim
         self.leeway_seconds = leeway_seconds
         self.timeout_seconds = timeout_seconds
+        self.refresh_cooldown_seconds = refresh_cooldown_seconds
         self._jwks_url = jwks_url
         self._client: PyJWKClient | None = None
 
@@ -101,7 +105,9 @@ class OidcVerifier:
     def client(self) -> PyJWKClient:
         if self._client is None:
             url = self._jwks_url or self._discover()
-            self._client = PyJWKClient(url, cache_keys=True, lifespan=300, timeout=self.timeout_seconds)
+            self._client = PyJWKClient(
+                url, cache_keys=True, lifespan=300, timeout=self.timeout_seconds, cooldown_duration=self.refresh_cooldown_seconds
+            )
         return self._client
 
     def verify(self, token: str) -> Principal:

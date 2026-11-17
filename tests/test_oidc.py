@@ -160,7 +160,7 @@ def test_the_public_key_cannot_be_used_as_an_hmac_secret(provider):
 
 
 def test_a_rotated_key_is_fetched_once_and_cached_keys_are_reused(provider):
-    v = verifier(provider)
+    v = verifier(provider, refresh_cooldown_seconds=0)
     v.verify(provider.token("k1"))
     v.verify(provider.token("k1"))
     assert provider.jwks_fetches == 1
@@ -169,6 +169,14 @@ def test_a_rotated_key_is_fetched_once_and_cached_keys_are_reused(provider):
     assert provider.jwks_fetches == 2
     # A key id the provider does not publish (a forged or stale token) is refused after one more look
     assert "Unable to find a signing key" in _refused(v, _unknown_kid_token(provider))
+
+
+def test_tokens_with_made_up_key_ids_cannot_make_every_request_call_the_provider(provider):
+    v = verifier(provider)  # the default cooldown
+    v.verify(provider.token("k1"))
+    for _ in range(5):
+        assert "Unable to find a signing key" in _refused(v, _unknown_kid_token(provider))
+    assert provider.jwks_fetches == 1  # within the cooldown, an unknown key id does not refetch
 
 
 def _unknown_kid_token(provider):
