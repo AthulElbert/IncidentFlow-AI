@@ -1,0 +1,44 @@
+{
+  "servers": {
+    "prometheus": {
+      "transport": "stdio",
+      "command": ["prometheus-mcp-server"],
+      "env_passthrough": ["PROMETHEUS_URL"],
+      "call_timeout_seconds": 15,
+      "connect_timeout_seconds": 30
+    },
+    "telemetry-bridge": {
+      "transport": "http",
+      "url": "https://telemetry-bridge.internal.example/mcp"
+    }
+  },
+  "bindings": [
+    {
+      "family": "metrics",
+      "server": "prometheus",
+      "adapter": "prometheus",
+      "effect": "read",
+      "tools": { "query": "execute_range_query" },
+      "promql": {
+        "checkout-api/latency_p95_seconds": {
+          "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{service=\"checkout-api\"}[1m])) by (le))",
+          "unit": "seconds"
+        }
+      }
+    },
+    {
+      "family": "logs",
+      "server": "telemetry-bridge",
+      "adapter": "incidentflow",
+      "effect": "read",
+      "tools": { "search": "search_logs" }
+    },
+    {
+      "family": "deploys",
+      "server": "telemetry-bridge",
+      "adapter": "incidentflow",
+      "effect": "read",
+      "tools": { "recent": "recent_deploys" }
+    }
+  ]
+}

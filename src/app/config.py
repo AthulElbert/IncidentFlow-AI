@@ -129,6 +129,7 @@ class Settings:
     metrics_timeout_seconds: int = 10
     logs_mode: str = "mock"
     logs_file_path: str = ""
+    mcp_manifest: str = "ops/mcp_tools.json"
     deploy_history_mode: str = "mock"
     deploy_target_mode: str = "mock"
     tool_max_calls_per_run: int = 40
@@ -176,9 +177,9 @@ class Settings:
 
 
 _TOOL_MODES = {
-    "METRICS_MODE": ("metrics_mode", {"mock", "prometheus"}),
-    "LOGS_MODE": ("logs_mode", {"mock", "file"}),
-    "DEPLOY_HISTORY_MODE": ("deploy_history_mode", {"mock", "changes"}),
+    "METRICS_MODE": ("metrics_mode", {"mock", "prometheus", "mcp"}),
+    "LOGS_MODE": ("logs_mode", {"mock", "file", "mcp"}),
+    "DEPLOY_HISTORY_MODE": ("deploy_history_mode", {"mock", "changes", "mcp"}),
     "DEPLOY_TARGET_MODE": ("deploy_target_mode", {"mock", "jenkins"}),
     "INVESTIGATOR_MODE": ("investigator_mode", {"heuristic", "llm"}),
     "DEV_METRICS_MODE": ("dev_metrics_mode", {"mock", "prometheus"}),
@@ -214,6 +215,11 @@ def agent_editable_prefix(settings: "Settings", path: Path | None) -> str:
     return ""
 
 
+def mcp_manifest_path(settings: "Settings") -> Path:
+    path = Path(settings.mcp_manifest)
+    return path if path.is_absolute() else PROJECT_ROOT / path
+
+
 def routing_file_path(settings: "Settings") -> Path | None:
     """Where the LLM routing file is, if one is configured. A relative path is relative to the repo root."""
     if not settings.llm_routing_file:
@@ -237,6 +243,25 @@ def validate_settings(settings: "Settings") -> None:
         value = getattr(settings, attribute)
         if value not in allowed_modes:
             errors.append(f"{env_name} must be one of {sorted(allowed_modes)}, got '{value}'")
+    mcp_families = [
+        family
+        for family, mode in (("metrics", settings.metrics_mode), ("logs", settings.logs_mode), ("deploys", settings.deploy_history_mode))
+        if mode == "mcp"
+    ]
+    if mcp_families:
+        from app.mcp.manifest import ManifestError, load_manifest
+
+        manifest_path = mcp_manifest_path(settings)
+        editable = agent_editable_prefix(settings, manifest_path)
+        if editable:
+            errors.append(f"MCP_MANIFEST is inside '{editable}', which agents may edit; keep it outside CODE_CHANGE_ALLOWED_PATHS")
+        try:
+            manifest = load_manifest(manifest_path)
+            unbound = [family for family in mcp_families if family not in manifest.bindings]
+            if unbound:
+                errors.append(f"MCP_MANIFEST binds nothing for {unbound}, which are set to mcp")
+        except ManifestError as exc:
+            errors.append(f"MCP_MANIFEST: {exc}")
     if settings.logs_mode == "file" and not settings.logs_file_path:
         errors.append("LOGS_MODE=file requires LOGS_FILE_PATH")
     # With a routing file, each endpoint names its own key; LLM_API_KEY is then not required.
@@ -432,6 +457,7 @@ def load_settings(base_dir: str | None = None) -> Settings:
         metrics_timeout_seconds=_as_int(os.getenv("METRICS_TIMEOUT_SECONDS"), default=10),
         logs_mode=os.getenv("LOGS_MODE", "mock").strip().lower(),
         logs_file_path=os.getenv("LOGS_FILE_PATH", "").strip(),
+        mcp_manifest=os.getenv("MCP_MANIFEST", "ops/mcp_tools.json").strip(),
         deploy_history_mode=os.getenv("DEPLOY_HISTORY_MODE", "mock").strip().lower(),
         deploy_target_mode=os.getenv("DEPLOY_TARGET_MODE", "mock").strip().lower(),
         tool_max_calls_per_run=_as_int(os.getenv("TOOL_MAX_CALLS_PER_RUN"), default=40),

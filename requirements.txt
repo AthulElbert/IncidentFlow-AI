@@ -9,3 +9,4 @@ psycopg[binary]>=3.2.0
 langgraph>=1.0.0
 langgraph-checkpoint-sqlite>=3.0.0
 langgraph-checkpoint-postgres>=3.0.0
+mcp>=2.3.0

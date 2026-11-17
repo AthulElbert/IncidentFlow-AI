@@ -126,17 +126,21 @@ class PrometheusMetricsTool:
         if body.get("status") != "success":
             raise ToolError(f"Prometheus query failed: {body.get('error', 'unknown error')}")
 
-        results = body.get("data", {}).get("result", [])
-        points: list[MetricPoint] = []
-        if results:
-            for raw_ts, raw_value in results[0].get("values", []):
-                try:
-                    value = float(raw_value)
-                except (TypeError, ValueError):
-                    continue
-                if value != value:  # NaN: no data for that step
-                    continue
-                points.append(
-                    MetricPoint(timestamp=datetime.fromtimestamp(float(raw_ts), tz=timezone.utc), value=value)
-                )
-        return MetricSeries(service=service, metric=metric, unit=entry.unit, points=points)
+        return series_from_prometheus(service, metric, entry.unit, body.get("data", {}).get("result", []))
+
+
+def series_from_prometheus(service: str, metric: str, unit: str, results: list) -> MetricSeries:
+    """A Prometheus range-query result (`data.result` of a matrix) as our series. Only the first series is used."""
+    points: list[MetricPoint] = []
+    if results and isinstance(results[0], dict):
+        for pair in results[0].get("values", []):
+            try:
+                raw_ts, raw_value = pair
+                value = float(raw_value)
+                timestamp = datetime.fromtimestamp(float(raw_ts), tz=timezone.utc)
+            except (TypeError, ValueError):
+                continue
+            if value != value:  # NaN: no data for that step
+                continue
+            points.append(MetricPoint(timestamp=timestamp, value=value))
+    return MetricSeries(service=service, metric=metric, unit=unit, points=points)

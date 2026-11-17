@@ -151,9 +151,11 @@ def run_replay(
     history: list[IncidentRecord] | None = None,
     audit: AuditLog | None = None,
     on_result: Callable[[ScenarioResult], None] | None = None,
+    toolkit: Toolkit | None = None,
 ) -> ReplaySummary:
+    """`toolkit` replaces the simulated tools (for example with MCP backends serving the same scenarios)."""
     history = eval_history() if history is None else history
-    toolkit = toolkit_for(scenarios, history)
+    toolkit = toolkit or toolkit_for(scenarios, history)
     results: list[ScenarioResult] = []
 
     for scenario in scenarios:

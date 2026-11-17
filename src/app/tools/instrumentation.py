@@ -123,6 +123,9 @@ _GUARDED: "weakref.WeakKeyDictionary[ToolProxy, _Guarded]" = weakref.WeakKeyDict
 def _record(guard: _Guarded, action: str, details: dict[str, Any]) -> None:
     if guard.context.audit is None:
         return
+    backend = getattr(guard.tool, "backend_label", None)  # which MCP server answered, for example
+    if backend:
+        details = {**details, "backend": backend}
     guard.context.audit.append(
         new_audit_entry(
             actor=guard.context.actor,
@@ -226,6 +229,7 @@ class Toolkit:
     dev_metrics: MetricsTool | None = None
     max_calls_per_run: int = 40
     permissions: dict[str, dict[str, frozenset[str]]] = field(default_factory=lambda: dict(AGENT_PERMISSIONS))
+    mcp: Any = None  # the MCP connections, when a backend is an MCP server; closed at shutdown
 
     def for_agent(
         self,

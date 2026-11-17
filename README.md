@@ -208,6 +208,16 @@ Every model call goes through a router. With only the `LLM_*` settings it is one
 
 `GET /v1/llm/status` shows the routing and each endpoint's health. Token usage and cost of every call are recorded on the run and in the audit log (never the prompt or reply).
 
+### MCP servers as tool backends
+
+Metrics, logs and deploy history can come from MCP servers: set `METRICS_MODE`, `LOGS_MODE` or `DEPLOY_HISTORY_MODE` to `mcp` and describe the servers in `MCP_MANIFEST` (see `ops/mcp_tools.example.json`). Agents still call the same typed tools; MCP is only the transport.
+
+- **Read-only bindings only.** A binding must declare `"effect": "read"`; tools with side effects are never reachable from an agent.
+- **Nothing a server says is trusted.** Its tool descriptions are never shown to a model, its replies are parsed into our own types or refused, and text from it is capped.
+- **Prometheus:** the `prometheus` adapter works with servers that run PromQL range queries (such as `prometheus-mcp-server`), using the same fixed query catalog as the direct backend, so a model never supplies PromQL.
+- **Isolation:** a stdio server starts with only the environment variables you name, in an empty working directory.
+- **Fails closed:** the app checks every bound server and tool at startup and will not start without them.
+
 ### Tool registry, follow-up evidence and re-diagnosis
 
 Every tool an agent can use is declared once in `src/app/tools/registry.py`: who may call it, whether a model may ask for it, whether it writes, and its argument schema. Permissions and the example requests in prompts are generated from it, and every request a model makes is checked against it before anything runs. A model may only ask for a write inside its own worktree.

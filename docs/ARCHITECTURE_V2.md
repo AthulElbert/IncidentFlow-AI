@@ -1,6 +1,6 @@
 # IncidentFlow-AI: architecture v2 (design)
 
-Status: **design. Implemented so far: step 8.0 (first real-model run, section 9.1), workstreams B (tool registry and follow-ups, 4.4), E (LLM routing, 7.3), D (durable runs, 6.6) and F's isolated test execution (8.5). The rest is not.** It extends `docs/ARCHITECTURE.md` (Phases 0 to 7, implemented). Where this document names a third-party API (MCP SDK, LangGraph checkpointers, pgvector, OPA) it is written from general knowledge and each is listed in section 12 to be verified against current documentation before coding.
+Status: **design. Implemented so far: step 8.0 (first real-model run, section 9.1), workstreams A (MCP backends, 3.7), B (tool registry and follow-ups, 4.4), E (LLM routing, 7.3), D (durable runs, 6.6) and F's isolated test execution (8.5). The rest is not.** It extends `docs/ARCHITECTURE.md` (Phases 0 to 7, implemented). Where this document names a third-party API (MCP SDK, LangGraph checkpointers, pgvector, OPA) it is written from general knowledge and each is listed in section 12 to be verified against current documentation before coding.
 
 ## 1. Scope
 
@@ -73,7 +73,7 @@ Agents today call `tools.metrics.query(service, metric, window)`. That contract 
 | Component | Responsibility |
 |---|---|
 | `mcp/manager.py` `McpConnectionManager` | Owns connections to configured MCP servers: start, health, reconnect, per-call timeout, circuit breaker. Runs the async MCP SDK on one dedicated event-loop thread and exposes a synchronous `call(server, tool, args)` via `run_coroutine_threadsafe`, because agents run on a thread pool. |
-| `mcp/manifest.py` | Loads and validates `ops/mcp_tools.json` (below). Authoritative for everything the model may see. It lives outside `CODE_CHANGE_ALLOWED_PATHS`, and startup refuses a manifest inside an agent-editable path (the rule already enforced for the LLM routing file). |
+| `mcp/manifest.py` | Loads and validates the manifest (as built: JSON, `MCP_MANIFEST`, see 3.7). Authoritative for everything the model may see. It lives outside `CODE_CHANGE_ALLOWED_PATHS`, and startup refuses a manifest inside an agent-editable path (the rule already enforced for the LLM routing file). |
 | `tools/mcp_backends.py` | `McpMetricsTool`, `McpLogsTool`, `McpDeployHistoryTool`, `McpKubernetesTool`, ... Each implements an existing protocol by calling named MCP tools and **mapping the result into our own models** (`MetricSeries`, `LogLine`, `Deploy`). Mapping is code; a malformed result becomes a `ToolError`, which already becomes evidence of the failure. |
 | `tools/factory.py` | Selects a backend per family from settings (`METRICS_MODE=prometheus|mcp|mock`, and so on), as it does for modes today. |
 
@@ -129,6 +129,16 @@ A **Kubernetes evidence family** (read-only: pod status, recent events, restarts
 ### 3.6 Not in this workstream
 
 Exposing IncidentFlow itself as an MCP server (for other tools to read cases). Easy to add read-only later; not needed for the goal.
+
+### 3.7 As implemented (step 8.5: `app/mcp/manifest.py`, `manager.py`, `backends.py`)
+
+- **SDK checked first.** The installed `mcp` is 2.3.0, newer than the design assumed: `FastMCP` is now `MCPServer`, and a high-level async `Client` takes a URL, `StdioServerParameters`, or (in tests) a server object. A probe found what the design could not have known: a failing tool returns `is_error=True` instead of raising; the SDK's read timeout stopped a slow tool over stdio but not in-process; a tool's plain-string return arrives wrapped as structured content; connecting to a stdio server takes about a second; a server's descriptions arrive verbatim (the probe's said "ignore your rules").
+- **Manifest** (`MCP_MANIFEST`, JSON, example in `ops/mcp_tools.example.json`, not YAML to avoid a dependency). Bindings for `metrics`, `logs` and `deploys` only, each with `"effect": "read"` (anything else is refused) and a named adapter. Servers get only the environment variables they name. The manifest is refused inside an agent-editable path. Authenticated HTTP servers are refused for now (stdio and unauthenticated local or https servers work).
+- **Connection manager.** One background event loop, a persistent session per server, our own `asyncio.wait_for` timeout on every call, `is_error` checked, a result size cap, a circuit breaker per server, and a fresh connection after a transport failure. Every failure is a `ToolError`, which the agents already record as evidence that could not be collected. At startup it connects and checks each bound tool exists, and the app will not start otherwise (unless the demo-only `ALLOW_MOCK_FALLBACK`). It records, as a warning, any tool that does not declare itself read-only; the declaration itself is never trusted.
+- **Stdio isolation.** A server starts with PATH (and SYSTEMROOT on Windows) plus its named variables, in an empty temporary working directory. Reading the community `prometheus-mcp-server`'s source before running it showed why the directory matters: it loads a `.env` from its working directory on start, which, started from this repository, would hand it this project's secrets (the LLM key is in `.env`).
+- **Backends.** `McpPrometheusMetrics` (for servers that run PromQL range queries and return Prometheus' own format) uses the same fixed PromQL catalog and the same result parser as the direct Prometheus backend, so a model still never supplies PromQL; an unknown metric is refused before any call. `McpMetrics`, `McpLogs` and `McpDeployHistory` implement a small project contract for bridges in front of other systems. Replies are parsed into our types or refused; log and deploy text is length-capped; lines and deploys outside the requested service or window are dropped, because a server's own filtering is not trusted. Audit entries record which server answered (`details.backend`).
+- **Verified** over real MCP, in-process and as a stdio subprocess, against a test server that serves the replay scenarios: the Investigator reaches identical answers, confidences, decisions and follow-ups on all eight scenarios through MCP as through the simulators; a stdio server saw none of the host's other environment variables and an empty working directory; plus the failure paths above. 36 tests.
+- **Verified with a third-party server and a real Prometheus.** The community `prometheus-mcp-server` 1.6.2 (source read before running: it only makes GET requests to `PROMETHEUS_URL`), installed in its own virtual environment and started by the manager as a stdio subprocess, in front of Prometheus 3.5 in Docker. It connected in about 3 seconds, every one of its six tools declared itself read-only, and two catalog queries returned **identical points** through MCP and through the direct backend; an unknown metric was refused before reaching it, and invalid PromQL came back as a `ToolError`. The first comparison was not identical: every timestamp differed by 1 ms, because the adapter sent ISO timestamps (which Prometheus truncated to the millisecond) where the direct backend sends Unix seconds rounded to three decimals. The adapter now sends the same Unix form. **Not done:** Kubernetes evidence (needs new scoring signals), a GitHub backend, authenticated HTTP servers, IncidentFlow as an MCP server.
 
 ## 4. Workstream B: registry-driven tool selection
 
@@ -385,7 +395,7 @@ Gate 0  Run a real model through the existing system (prerequisite, not a build 
 | 8.2 | F 8.4: container sandbox and the host-execution rule | M, **done** |
 | 8.3 | D: checkpointer, attempt-level resume, crash-loop guard | M, **done** |
 | 8.4 | B: registry, gap-driven follow-ups, re-diagnose edge | M, **done** |
-| 8.5 | A: MCP manager, manifest, Prometheus and GitHub backends, then Kubernetes evidence | L |
+| 8.5 | A: MCP manager, manifest, Prometheus and GitHub backends, then Kubernetes evidence | L, **done in part** (manager, manifest, Prometheus/metrics/logs/deploys backends, checked with a third-party server; not GitHub or Kubernetes) |
 | 8.6 | C: schema, indexer, hybrid search, finalised postmortems, retrieval eval | L |
 | 8.7 | F 8.1 to 8.3: policy engine, scoped authorisation, OIDC | L |
 

@@ -337,6 +337,8 @@ async def _lifespan(_: FastAPI):
     scheduler.stop()
     agent_runner.shutdown()
     checkpointing.close()
+    if toolkit.mcp is not None:
+        toolkit.mcp.close()
 
 
 app.router.lifespan_context = _lifespan

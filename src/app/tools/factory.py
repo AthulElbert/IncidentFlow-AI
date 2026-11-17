@@ -17,6 +17,26 @@ from app.tools.sandbox import GitWorktreeProvider
 from app.tools.test_runners import ContainerTestRunner
 
 
+def _mcp(settings: Settings, families: list[str]):
+    """Connect to the manifest's servers and check they offer the bound tools. Fails closed at startup."""
+    from app.config import mcp_manifest_path
+    from app.mcp.manager import McpConnectionManager
+    from app.mcp.manifest import load_manifest
+
+    manifest = load_manifest(mcp_manifest_path(settings))
+    manager = McpConnectionManager(manifest.servers)
+    wanted: dict[str, set[str]] = {}
+    for family in families:
+        binding = manifest.bindings[family]
+        wanted.setdefault(binding.server, set()).update(binding.tools.values())
+    try:
+        manager.check_bindings(wanted)
+    except Exception:
+        manager.close()
+        raise
+    return manager, manifest
+
+
 def build_toolkit(
     settings: Settings,
     change_store: ChangeControlStore,
@@ -26,8 +46,26 @@ def build_toolkit(
 ) -> tuple[Toolkit, GitWorktreeProvider, dict[str, str]]:
     """Build the tool layer from settings. Returns (toolkit, sandbox provider, mode per tool)."""
     modes: dict[str, str] = {}
+    mcp_families = [
+        family
+        for family, mode in (("metrics", settings.metrics_mode), ("logs", settings.logs_mode), ("deploys", settings.deploy_history_mode))
+        if mode == "mcp"
+    ]
+    manager = manifest = None
+    if mcp_families:
+        from app.mcp.backends import McpDeployHistory, McpLogs, McpMetrics, McpPrometheusMetrics
 
-    if settings.metrics_mode == "prometheus":
+        try:
+            manager, manifest = _mcp(settings, mcp_families)
+        except Exception as exc:
+            raise_unless_mock_fallback(settings, "MCP backends", exc)
+            mcp_families = []  # demo-only fallback (ALLOW_MOCK_FALLBACK): the simulators answer instead
+
+    if "metrics" in mcp_families:
+        binding = manifest.bindings["metrics"]
+        metrics = (McpPrometheusMetrics if binding.adapter == "prometheus" else McpMetrics)(manager, binding)
+        modes["metrics"] = f"mcp:{binding.server}"
+    elif settings.metrics_mode == "prometheus":
         try:
             metrics = PrometheusMetricsTool(
                 base_url=settings.metrics_base_url,
@@ -41,12 +79,17 @@ def build_toolkit(
     else:
         metrics, modes["metrics"] = MockMetricsTool(), "mock"
 
-    if settings.logs_mode == "file":
+    if "logs" in mcp_families:
+        logs, modes["logs"] = McpLogs(manager, manifest.bindings["logs"]), f"mcp:{manifest.bindings['logs'].server}"
+    elif settings.logs_mode == "file":
         logs, modes["logs"] = FileLogsTool(Path(base_dir) / settings.logs_file_path), "file"
     else:
         logs, modes["logs"] = MockLogsTool(), "mock"
 
-    if settings.deploy_history_mode == "changes":
+    if "deploys" in mcp_families:
+        deploys = McpDeployHistory(manager, manifest.bindings["deploys"])
+        modes["deploys"] = f"mcp:{manifest.bindings['deploys'].server}"
+    elif settings.deploy_history_mode == "changes":
         deploys, modes["deploys"] = ChangeStoreDeployHistory(change_store), "changes"
     else:
         deploys, modes["deploys"] = MockDeployHistoryTool(), "mock"
@@ -94,6 +137,7 @@ def build_toolkit(
         deploy_target=deploy_target,
         dev_metrics=dev_metrics,
         max_calls_per_run=settings.tool_max_calls_per_run,
+        mcp=manager,
     )
 
     test_runner = None
