@@ -19,6 +19,7 @@ from typing import Protocol
 from app.paths import normalize_rel_path
 from app.tools.base import ToolError
 from app.tools.models import EditResult, FileMatch, TestResult
+from app.tools.test_runners import TestRunner
 
 _READ_DENY = (".git/*", ".env", ".env.*", "*/.env", "*/.env.*", "*.pem", "*.key", "*id_rsa*", "secrets/*", "*/secrets/*")
 _EDIT_DENY = _READ_DENY + (
@@ -109,6 +110,7 @@ class FileSandbox:
         test_timeout_seconds: int = 120,
         extra_env: dict[str, str] | None = None,
         disposable: bool = False,
+        test_runner: "TestRunner | None" = None,
     ) -> None:
         # `disposable` marks a checkout that exists only for this agent run (a worktree the provider
         # created), which is the only kind reset() may wipe.
@@ -121,6 +123,8 @@ class FileSandbox:
         self.test_command = test_command
         self.test_timeout_seconds = test_timeout_seconds
         self.extra_env = dict(extra_env or {})
+        # With a runner (a container) the tests do not execute on the host at all; see tools/test_runners.py.
+        self.test_runner = test_runner
         self._originals: dict[str, str | None] = {}
 
     # ------------------------------------------------------------------ paths
@@ -314,6 +318,8 @@ class FileSandbox:
         return env
 
     def run_tests(self) -> TestResult:
+        if self.test_runner is not None:
+            return self.test_runner.run(self.root)
         started = time.monotonic()
         try:
             command = (
@@ -360,8 +366,10 @@ class GitWorktreeProvider:
         test_command: str = "python -m pytest -q tests",
         test_timeout_seconds: int = 120,
         worktrees_dir: str = ".agent_worktrees",
+        test_runner: "TestRunner | None" = None,
     ) -> None:
         self.repo_root = Path(repo_root).resolve()
+        self.test_runner = test_runner
         self.allowed_edit_paths = allowed_edit_paths
         self.max_edit_lines = max_edit_lines
         self.test_command = test_command
@@ -395,4 +403,5 @@ class GitWorktreeProvider:
             test_command=self.test_command,
             test_timeout_seconds=self.test_timeout_seconds,
             disposable=True,
+            test_runner=self.test_runner,
         )

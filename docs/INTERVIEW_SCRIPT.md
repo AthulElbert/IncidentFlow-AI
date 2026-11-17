@@ -113,7 +113,7 @@ Format: **Q**, the answer, then **Follow-ups**.
 **Q: How do you stop the model doing something dangerous?**
 > "In layers, none of which depends on the model behaving. Agents only hold the tools their role needs, through proxies that count and audit every call. Only the Fixer can edit, only inside a disposable git worktree, with an allowed-paths list, protected files and a line limit. No agent can approve or release. The lifecycle rejects illegal state changes. A person approves and a different person releases."
 
-- *Follow-up: Is that a real sandbox?* "No, and I say so. It's an in-process boundary that stops accidents and bypasses by well-behaved code. It isn't a defence against hostile code in the same process. For that I'd run agents in containers."
+- *Follow-up: Is that a real sandbox?* "Two layers. The tool proxies are an in-process boundary: they stop accidents and keep the audit trail, but they aren't a defence against hostile code. The part that executes model-written code, running the tests, happens in a container: no network, worktree read-only, no capabilities, unprivileged user, resource limits, no host secrets. The app won't run the Fixer's model with host execution unless you opt in explicitly. A kernel-level container escape is the limit of that; gVisor or a VM would be the next step."
 - *Follow-up: What stops the Fixer editing the tests so they pass?* "Scope and protected-file rules, plus the Verifier checking that the files changed match the diff, and the Critic flagging unrelated or test-file changes. I won't claim that's airtight; a determined bad fix is exactly why a person still reviews the diff."
 
 **Q: How do you handle hallucination?**
@@ -285,7 +285,7 @@ Run with `AGENT_RUN_MODE=manual` and the local stand-in model. Narrate what each
 - **Usage spent by an interrupted stage isn't counted** after a resume.
 - **No background Jenkins polling;** promotions need a manual refresh.
 - **No automatic post-release monitoring or rollback.**
-- **No JavaScript tests;** auth is API-key/JWT, not SSO; agents are not containerised.
+- **No JavaScript tests;** auth is API-key/JWT, not SSO. Tests of model-written code run in a container, but the agents themselves run in-process.
 - **Demo-level:** mock backends for metrics, logs, Jenkins, Jira. The real interfaces exist.
 
 A line to use: *"I'd rather tell you what I haven't verified than have you find it."*

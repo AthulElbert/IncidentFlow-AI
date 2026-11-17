@@ -80,6 +80,7 @@ def test_the_app_builds_both_agents_from_settings(monkeypatch):
 
     monkeypatch.setenv("LLM_API_KEY", "key")
     monkeypatch.setenv("FIXER_MODE", "llm")
+    monkeypatch.setenv("ALLOW_HOST_EXECUTION", "true")  # a test app; no fix is ever tested here
     monkeypatch.setenv("FIXER_MODEL", "coder-model")
     monkeypatch.setenv("FIXER_MAX_STEPS", "9")
     monkeypatch.setenv("CRITIC_MODE", "llm")

@@ -14,6 +14,7 @@ from app.tools.logs import FileLogsTool, MockLogsTool
 from app.tools.memory import LexicalIncidentMemory
 from app.tools.metrics import MockMetricsTool, PrometheusMetricsTool
 from app.tools.sandbox import GitWorktreeProvider
+from app.tools.test_runners import ContainerTestRunner
 
 
 def build_toolkit(
@@ -95,6 +96,21 @@ def build_toolkit(
         max_calls_per_run=settings.tool_max_calls_per_run,
     )
 
+    test_runner = None
+    modes["test_execution"] = "host"
+    if settings.sandbox_exec == "container":
+        test_runner = ContainerTestRunner(
+            image=settings.sandbox_image,
+            command=settings.sandbox_test_command,
+            timeout_seconds=settings.test_evidence_timeout_seconds,
+            memory=settings.sandbox_memory,
+            cpus=settings.sandbox_cpus,
+            pids_limit=settings.sandbox_pids_limit,
+        )
+        # Fail closed at startup: never quietly run model-written code on the host because Docker is missing.
+        test_runner.check_available()
+        modes["test_execution"] = "container"
+
     allowed_paths = [part.strip() for part in settings.code_change_allowed_paths.split(",") if part.strip()]
     sandboxes = GitWorktreeProvider(
         repo_root=base_dir,
@@ -102,5 +118,6 @@ def build_toolkit(
         max_edit_lines=settings.code_change_max_lines,
         test_command=settings.test_evidence_command,
         test_timeout_seconds=settings.test_evidence_timeout_seconds,
+        test_runner=test_runner,
     )
     return toolkit, sandboxes, modes

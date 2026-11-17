@@ -208,6 +208,16 @@ Every model call goes through a router. With only the `LLM_*` settings it is one
 
 `GET /v1/llm/status` shows the routing and each endpoint's health. Token usage and cost of every call are recorded on the run and in the audit log (never the prompt or reply).
 
+### Running a fix's tests in a container
+
+The Verifier runs the tests of a worktree the Fixer edited, and those tests execute code the Fixer's model may have written. `SANDBOX_EXEC=container` runs them in a locked-down container: no network, the worktree read-only, a read-only root filesystem, no Linux capabilities, an unprivileged user, memory, CPU and process limits, and none of the host's environment. Build the image once:
+
+```powershell
+docker build -f ops/sandbox.Dockerfile -t incidentflow-sandbox:latest .
+```
+
+With `SANDBOX_EXEC=container` the app will not start if Docker or the image is missing, and a Docker failure is reported as "tests could not run" (the run escalates), never as failing tests and never by falling back to the host. `FIXER_MODE=llm` with the default `SANDBOX_EXEC=host` is refused unless you set `ALLOW_HOST_EXECUTION=true`.
+
 ### Run budgets
 
 One run has limits on the whole: `AGENT_RUN_MAX_SECONDS` (900), `AGENT_RUN_MAX_TOOL_CALLS` (150, shared by all agents and attempts), `AGENT_RUN_MAX_LLM_CALLS` (60), `AGENT_RUN_MAX_TOKENS` (600,000) and `AGENT_RUN_MAX_COST` (0 = no limit). Time and tool calls are checked before each stage; a tool or model call past its limit is refused where it is attempted, so a fix that used the last model call is still verified. Exceeding one escalates the change with the reason ("run budget exceeded: the run used its 900s time limit"); a fix that is already verified and reviewed is not thrown away because packaging ran past the clock. What a run used is recorded on it (`agent_run.budget`). Tokens and cost are counted when the provider reports usage. Out of model budget, the Investigator answers from the evidence and the Critic reviews by its rules.

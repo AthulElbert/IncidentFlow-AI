@@ -248,9 +248,10 @@ def test_factory_defaults_to_mock_backends(monkeypatch, tmp_path):
         "deploy_target": "mock",
         "dev_metrics": "mock",
         "memory": "lexical",
+        "test_execution": "host",
     }
     assert toolkit.max_calls_per_run == 40
-    assert provider.repo_root == tmp_path.resolve()
+    assert provider.repo_root == tmp_path.resolve() and provider.test_runner is None
 
 
 def test_factory_builds_the_local_backends(monkeypatch, tmp_path):

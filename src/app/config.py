@@ -162,6 +162,13 @@ class Settings:
     agent_run_max_cost: float = 0.0
     llm_routing_file: str = ""
     checkpoint_backend: str = "memory"
+    sandbox_exec: str = "host"
+    sandbox_image: str = "incidentflow-sandbox:latest"
+    sandbox_test_command: str = "python -m pytest -q tests"
+    sandbox_memory: str = "1g"
+    sandbox_cpus: str = "1"
+    sandbox_pids_limit: int = 256
+    allow_host_execution: bool = False
     checkpoint_sqlite_file: str = ""
     agent_run_max_resumes: int = 2
     llm_max_retries: int = 2
@@ -179,6 +186,7 @@ _TOOL_MODES = {
     "AGENT_RUN_MODE": ("agent_run_mode", {"off", "manual", "auto", "shadow"}),
     "EVENT_BUS_MODE": ("event_bus_mode", {"auto", "kafka"}),
     "CHECKPOINT_BACKEND": ("checkpoint_backend", {"memory", "sqlite", "postgres"}),
+    "SANDBOX_EXEC": ("sandbox_exec", {"host", "container"}),
     "MOCK_DEV_EFFECT": ("mock_dev_effect", {"resolves", "no_effect", "partial", "regresses_other", "deploy_fails"}),
 }
 
@@ -256,6 +264,17 @@ def validate_settings(settings: "Settings") -> None:
             load_routing_file(routing_file_path(settings), os.environ, settings.llm_max_retries)
         except ValueError as exc:
             errors.append(f"LLM_ROUTING_FILE: {exc}")
+    # The Verifier runs the tests of a worktree the Fixer's model edited. On the host that executes model-written
+    # code on this machine; doing so must be a deliberate, visible choice.
+    if settings.fixer_mode == "llm" and settings.sandbox_exec == "host" and not settings.allow_host_execution:
+        errors.append(
+            "FIXER_MODE=llm runs tests of model-written code: set SANDBOX_EXEC=container "
+            "(see ops/sandbox.Dockerfile), or ALLOW_HOST_EXECUTION=true to accept running it on this machine"
+        )
+    if settings.sandbox_exec == "container" and (not settings.sandbox_image or not settings.sandbox_test_command):
+        errors.append("SANDBOX_EXEC=container requires SANDBOX_IMAGE and SANDBOX_TEST_COMMAND")
+    if settings.sandbox_pids_limit < 16:
+        errors.append("SANDBOX_PIDS_LIMIT must be at least 16")
     if settings.checkpoint_backend == "postgres" and not settings.database_url:
         errors.append("CHECKPOINT_BACKEND=postgres requires DATABASE_URL")
     if not 0 <= settings.agent_run_max_resumes <= 5:
@@ -443,6 +462,13 @@ def load_settings(base_dir: str | None = None) -> Settings:
         agent_run_max_cost=_as_float(os.getenv("AGENT_RUN_MAX_COST"), default=0.0),
         llm_routing_file=os.getenv("LLM_ROUTING_FILE", "").strip(),
         checkpoint_backend=os.getenv("CHECKPOINT_BACKEND", "memory").strip().lower(),
+        sandbox_exec=os.getenv("SANDBOX_EXEC", "host").strip().lower(),
+        sandbox_image=os.getenv("SANDBOX_IMAGE", "incidentflow-sandbox:latest").strip(),
+        sandbox_test_command=os.getenv("SANDBOX_TEST_COMMAND", "python -m pytest -q tests").strip(),
+        sandbox_memory=os.getenv("SANDBOX_MEMORY", "1g").strip(),
+        sandbox_cpus=os.getenv("SANDBOX_CPUS", "1").strip(),
+        sandbox_pids_limit=_as_int(os.getenv("SANDBOX_PIDS_LIMIT"), default=256),
+        allow_host_execution=_as_bool(os.getenv("ALLOW_HOST_EXECUTION"), default=False),
         checkpoint_sqlite_file=os.getenv("CHECKPOINT_SQLITE_FILE", "").strip(),
         agent_run_max_resumes=_as_int(os.getenv("AGENT_RUN_MAX_RESUMES"), default=2),
         llm_max_retries=_as_int(os.getenv("LLM_MAX_RETRIES"), default=2),

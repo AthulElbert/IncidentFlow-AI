@@ -414,6 +414,7 @@ def test_with_a_routing_file_each_agent_gets_its_profile_and_no_main_key_is_need
     monkeypatch.setenv("KEY_A", "secret-a")
     for mode in ("FIXER_MODE", "CRITIC_MODE", "INVESTIGATOR_MODE"):
         monkeypatch.setenv(mode, "llm")
+    monkeypatch.setenv("ALLOW_HOST_EXECUTION", "true")
     settings = load_settings()
     validate_settings(settings)  # no LLM_API_KEY, and that is fine
 
@@ -748,7 +749,7 @@ def test_the_status_endpoint_shows_routing_and_health_and_never_a_key(make_app, 
     assert plain.get("/v1/llm/status", headers=VIEWER).json() == {"configured": False}
     assert plain.get("/v1/llm/status").status_code == 401
 
-    _, client = make_app(LLM_ROUTING_FILE=str(_routing_file(tmp_path)), KEY_A="very-secret", FIXER_MODE="llm")
+    _, client = make_app(LLM_ROUTING_FILE=str(_routing_file(tmp_path)), KEY_A="very-secret", FIXER_MODE="llm", ALLOW_HOST_EXECUTION="true")
     status = client.get("/v1/llm/status", headers=VIEWER)
 
     body = status.json()
