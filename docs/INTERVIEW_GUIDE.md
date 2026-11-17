@@ -101,9 +101,9 @@ Interviewers remember a specific bug far better than a feature list. Use the **s
 
 Being upfront here is a strength. Don't wait to be caught.
 
-- **No real LLM has been run through it.** Everything model-driven was tested with a scripted model and a local stand-in server. I expect prompt tuning to be the biggest remaining unknown.
+- **Only a few real-model runs so far.** Gemini (flash-lite) ran the whole flow: one correct verified fix, and one prompt-injection scenario it resisted. Three runs are a smoke test, not an evaluation, and the free tier's daily quota stopped further runs.
 - **Kafka has only been tested against an in-memory stand-in**, not a real broker.
-- **Durable runs are tested with SQLite only.** An interrupted run resumes after a restart (tested by force-killing the app), but the Postgres checkpointer hasn't met a real database.
+- **Durable runs:** an interrupted run resumes after a restart, tested by force-killing the app, and the Postgres paths (store, audit log, outbox and checkpointer) now pass against a real Postgres 16. Usage spent inside the interrupted stage isn't counted.
 - **Nothing polls Jenkins in the background,** so a promotion needs a manual status refresh.
 - **It's demo-level.** The architecture is built for a real environment (Prometheus, Loki, Jenkins, Postgres, Kafka are all interfaces), but I implemented mock and local backends.
 
@@ -189,4 +189,4 @@ If the live demo breaks, fall back to the timeline and review screens from a fin
 | Events | Pull-based bus (in-process / Postgres outbox / Kafka), at-least-once, idempotent consumers |
 | Learning | Incident outcome: only `resolved` teaches; resolution written from facts |
 | Trust-building | Shadow mode + agent outcome metrics + run budgets |
-| Biggest unknown | Real-model behaviour: never run against a real LLM yet |
+| Biggest unknown | How it does on real incidents: only a few real-model runs on scenarios I wrote |

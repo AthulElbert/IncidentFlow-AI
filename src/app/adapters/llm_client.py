@@ -1,4 +1,5 @@
 ﻿import json
+import re
 import ssl
 from dataclasses import dataclass
 from typing import Protocol
@@ -9,15 +10,62 @@ from app.models.schemas import APMEvent
 
 # HTTP statuses worth retrying: the request may succeed if sent again.
 TRANSIENT_STATUSES = frozenset({408, 425, 429})
+# A reply wrapped in a markdown code fence: ```json ... ```
+_FENCE = re.compile(r"^```[a-zA-Z]*\s*|\s*```$")
+# Google's APIs say how long to wait in the error body (RetryInfo), e.g. "retryDelay": "41s".
+_RETRY_DELAY = re.compile(r'"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"')
 
 
 class LLMError(RuntimeError):
-    """A model call failed. `transient` means the same request may succeed if retried."""
+    """A model call failed. `transient` means the same request may succeed if retried.
 
-    def __init__(self, message: str, status: int | None = None, transient: bool = False) -> None:
+    `retry_after` is how many seconds the provider asked us to wait before trying again, when it said.
+    """
+
+    def __init__(
+        self, message: str, status: int | None = None, transient: bool = False, retry_after: float | None = None
+    ) -> None:
         super().__init__(message)
         self.status = status
         self.transient = transient
+        self.retry_after = retry_after
+
+
+def parse_json_object(content: str) -> dict:
+    """The JSON object in a model's reply, tolerating what models commonly wrap around it.
+
+    Seen in practice: a code fence around the object, or a separator such as `---` before it. Only the first
+    complete object is taken. Being lenient here is safe because every caller validates the object's fields
+    (allowed actions, tools and values) before acting on it.
+    """
+    text = content.strip()
+    try:
+        value = json.loads(text)
+    except ValueError:
+        unfenced = _FENCE.sub("", text).strip()
+        start = unfenced.find("{")
+        if start < 0:
+            raise ValueError("no JSON object in the reply") from None
+        value, _ = json.JSONDecoder().raw_decode(unfenced[start:])
+    if not isinstance(value, dict):
+        raise ValueError("LLM content is not an object")
+    return value
+
+
+def retry_after_seconds(header: str | None, body: str) -> float | None:
+    """How long the provider asked us to wait: the Retry-After header (seconds), or a retryDelay in the body.
+
+    A Retry-After given as an HTTP date is ignored (rare for model APIs); the caller then uses its own backoff.
+    """
+    if header:
+        try:
+            value = float(header.strip())
+            if value >= 0:
+                return value
+        except ValueError:
+            pass
+    match = _RETRY_DELAY.search(body or "")
+    return float(match.group(1)) if match else None
 
 
 @dataclass(frozen=True)
@@ -83,6 +131,19 @@ def _system_and_user(system_prompt: str, user_payload: dict) -> list[dict]:
     ]
 
 
+MAX_ERROR_DETAIL = 600
+
+
+def _describe_reply(body: object) -> str:
+    """A short description of an unusable reply: why it ended and the start of what it said, not the whole body."""
+    try:
+        choice = body["choices"][0]  # type: ignore[index]
+        content = str((choice.get("message") or {}).get("content", ""))
+        return f"finish_reason={choice.get('finish_reason')!r}, content starts {content[:120]!r}"
+    except Exception:
+        return f"unexpected response shape: {str(body)[:200]}"
+
+
 def _token_count(usage: object, key: str) -> int | None:
     value = usage.get(key) if isinstance(usage, dict) else None
     return value if isinstance(value, int) and value >= 0 else None
@@ -136,7 +197,10 @@ class OpenAICompatibleLLMClient:
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="ignore") if exc.fp else ""
             transient = exc.code in TRANSIENT_STATUSES or exc.code >= 500
-            raise LLMError(f"LLM API error {exc.code}: {detail}", status=exc.code, transient=transient) from exc
+            wait = retry_after_seconds(exc.headers.get("Retry-After") if exc.headers else None, detail)
+            raise LLMError(
+                f"LLM API error {exc.code}: {detail[:MAX_ERROR_DETAIL]}", status=exc.code, transient=transient, retry_after=wait
+            ) from exc
         except URLError as exc:
             raise LLMError(f"LLM connection error: {exc.reason}", transient=True) from exc
         except TimeoutError as exc:  # a read that stalls after the connection was made
@@ -146,11 +210,11 @@ class OpenAICompatibleLLMClient:
 
         try:
             content = body["choices"][0]["message"]["content"]
-            parsed = json.loads(content)
-            if not isinstance(parsed, dict):
-                raise ValueError("LLM content is not an object")
+            parsed = parse_json_object(content)
         except Exception as exc:
-            raise LLMError(f"Invalid {error_label} payload: {body}") from exc
+            # A model sometimes returns a malformed sample (seen with Gemini: finish_reason MALFORMED_FUNCTION_CALL and
+            # a junk character as content). Asking again usually works, so this is retryable; the router bounds it.
+            raise LLMError(f"Invalid {error_label} payload: {_describe_reply(body)}", transient=True) from exc
 
         usage = body.get("usage") if isinstance(body, dict) else None
         return LLMReply(parsed, _token_count(usage, "prompt_tokens"), _token_count(usage, "completion_tokens"))

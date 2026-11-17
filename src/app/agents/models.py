@@ -5,6 +5,20 @@ from pydantic import BaseModel, Field
 
 from app.models.schemas import APMEvent
 
+_REQUEST_KEYS = frozenset({"action", "tool", "method", "args"})
+
+
+def tool_args(request: dict[str, Any]) -> dict[str, Any]:
+    """The arguments of a model's tool request.
+
+    They belong in "args", but some models put them beside "tool" and "method" instead. Accepting that is safe:
+    the tool and method are still checked against what the agent may use, and each argument is still validated.
+    """
+    args = request.get("args")
+    if isinstance(args, dict):
+        return args
+    return {key: value for key, value in request.items() if key not in _REQUEST_KEYS}
+
 ISSUE_TYPES = (
     "application_error",
     "performance_degradation",

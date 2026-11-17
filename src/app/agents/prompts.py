@@ -11,7 +11,8 @@ Rules:
 - issue_type must be one of: application_error, performance_degradation, dependency_failure,
   resource_saturation, unknown. Use unknown when the evidence does not support a specific cause.
 
-You reply with ONE JSON object per turn, in one of two forms.
+You reply with ONE JSON object per turn, in one of two forms. Send only the object: no text, separator or code
+fence before or after it. Tool arguments go inside "args".
 
 1) Ask for more evidence (at most the number of times given in "tool_requests_remaining"):
    {"action": "tool", "tool": "logs", "method": "search", "args": {"query": "timeout", "minutes": 30}}
@@ -48,7 +49,8 @@ Rules:
 - Do not claim a result you have not seen. Do not say the fix is verified; the Verifier decides that.
 - If you cannot find a safe, targeted change, give a final answer with "no_fix": true and say why.
 
-You reply with ONE JSON object per turn, in one of two forms.
+You reply with ONE JSON object per turn, in one of two forms. Send only the object: no text, separator or code
+fence before or after it. Tool arguments go inside "args".
 
 1) Use a tool (you have a limited number of steps):
    {"action": "tool", "tool": "sandbox", "method": "list_files", "args": {"subdir": "config"}}
@@ -79,7 +81,7 @@ Rules:
 - Report only real concerns that you can point to in the diff. Do not repeat what the verification already shows.
 - You cannot approve anything and you cannot override a failed check. You can only add concerns.
 
-Reply with ONE JSON object:
+Reply with ONE JSON object, and nothing before or after it:
 {"concerns": [{"severity": "minor" | "major", "text": "what is wrong and where"}]}
 Use "major" only for something a human must look at before this goes any further. An empty list is a valid answer.
 """

@@ -95,13 +95,13 @@ Format: **Q**, the answer, then **Follow-ups**.
 > "The loop is a cycle with model-driven branching and retries, which LangGraph models directly. A workflow engine like Camunda is built for deterministic business processes. Bedrock would tie me to one cloud and one model, and I wanted the control logic to be mine. And I kept governance outside the graph on purpose, so swapping the orchestrator wouldn't touch the safety rules."
 
 - *Follow-up: Is LangGraph doing anything you couldn't do with a loop?* "No. A while loop would work. LangGraph gives me explicit state, conditional routing and a place to add checkpointing, and it reads clearly. I'd say that plainly; I'm not selling the library."
-- *Follow-up: What about its checkpointing?* "Progress is saved after every stage, in SQLite or Postgres. On restart an interrupted run resumes, but the unit of resumption is the fix attempt: if it died after the fix, it redoes that attempt from clean code, because I won't verify a worktree this process didn't produce. Resumes are capped and the budget carries over. I tested it by force-killing the app mid-fix and restarting it. The Postgres checkpointer hasn't met a real database, and usage from the stage that was interrupted isn't counted."
+- *Follow-up: What about its checkpointing?* "Progress is saved after every stage, in SQLite or Postgres. On restart an interrupted run resumes, but the unit of resumption is the fix attempt: if it died after the fix, it redoes that attempt from clean code, because I won't verify a worktree this process didn't produce. Resumes are capped and the budget carries over. I tested it by force-killing the app mid-fix and restarting it. I've run the Postgres checkpointer against a real database too. One gap: usage from the stage that was interrupted isn't counted."
 
 **Q: What's the data model? How is state stored?**
 > "One change record per incident, stored as JSON or Postgres JSONB behind the same interface. Every record has a version number; writes are conditional on it. Alongside are an append-only audit log, an event bus, and an incident memory store."
 
 - *Follow-up: Why JSON as a backend at all?* "So it runs with zero setup for a demo, with atomic writes. Postgres is the real backend, with a transactional outbox."
-- *Follow-up: Have you run it on real Postgres?* "The Postgres path is tested with a fake connection; the real-Postgres tests are gated behind an environment variable and I haven't run them. That's on my list."
+- *Follow-up: Have you run it on real Postgres?* "Yes, against Postgres 16 in Docker: concurrent writers never lose an update, the audit log's immutability trigger, the outbox bus, and a run killed mid-way that resumes from the Postgres checkpoint. Those tests are gated by an environment variable so CI runs without a database."
 
 **Q: How is the lifecycle enforced?**
 > "A transition table: each state lists which states may follow. It's checked inside the single write path, so there's no way to skip it. An agent run can only set a small set of states, and only one method can move a change to ready-for-approval."
@@ -178,7 +178,7 @@ Format: **Q**, the answer, then **Follow-ups**.
 > "By separating what's deterministic from what isn't. Most of the system, including governance, confidence scoring and verification, is deterministic and fully testable. For the model I used a scripted stand-in that replays canned replies, so the loop's behaviour, including bad outputs, is testable. About 600 tests, hermetic against throwaway data."
 
 - *Follow-up: How do you know the Investigator is accurate?* "I don't have a real-world accuracy number. I have a replay harness over seven scenarios that scores it against the old keyword classifier, but the scenarios and the rules were written together, so it's a regression check, not an accuracy estimate."
-- *Follow-up: Have you run a real LLM through it?* "Not yet. Everything model-driven was tested with a scripted model and a local server that speaks the same API. I expect prompt tuning to be the biggest remaining unknown, and it's the next thing I'd do."
+- *Follow-up: Have you run a real LLM through it?* "Yes, Gemini, on the free tier. The full flow produced a correct, verified fix, and on the prompt-injection scenario the model wasn't swayed and the Fixer declined rather than inventing a change. The surprises were not in the prompts: provider overload, rate limits and a daily quota, then malformed replies and arguments in the wrong place. I fixed each: honour the provider's retry delay, retry malformed replies, parse leniently but validate strictly. Three runs on a small model is a smoke test, not an evaluation."
 - *Follow-up: What's a bug the tests wouldn't have found?* "The Investigator counted the incident it was investigating as past evidence, inflating its confidence. Only a real end-to-end run in a browser showed it, because the mocks matched my assumptions."
 - *Follow-up: How do you test the UI?* "There are no JavaScript tests, which I'd call a gap. What I do have is a test that every button's enabled state agrees with what the server accepts at every stage, plus a check that every element the page wires up exists, because a missing id once blanked the dashboard."
 
@@ -207,7 +207,7 @@ Format: **Q**, the answer, then **Follow-ups**.
 ### J. Judgement, weaknesses and reflection
 
 **Q: What would you do differently?**
-> "Run against a real model much earlier. I built a lot of correct plumbing before seeing a real model's behaviour, and that's where I expect the surprises."
+> "Run against a real model much earlier. When I finally did, the first failures weren't prompts at all: overload, rate limits, a daily quota, and replies in slightly the wrong shape. All cheap to handle, but I'd have designed for them from day one."
 
 **Q: What's the biggest weakness?**
 > "Three, in order of importance: no real model run; the Kafka path and real Postgres have not met real infrastructure; and in-flight run state isn't durable. The design handles all three, but I haven't proved it."
@@ -280,10 +280,9 @@ Run with `AGENT_RUN_MODE=manual` and the local stand-in model. Narrate what each
 
 ## Part 8. What is not done (say it first)
 
-- **No real LLM has been run through it.** Scripted model and a local stand-in server only.
+- **Only a few real-model runs** (Gemini flash-lite, three full runs on my own scenarios): a smoke test, not an evaluation.
 - **Kafka only against an in-memory stand-in.**
-- **Real Postgres tests haven't been run** (gated, and I haven't had a database up).
-- **Durable runs only tested with SQLite;** the Postgres checkpointer hasn't met a real database, and usage spent by an interrupted stage isn't counted after a resume.
+- **Usage spent by an interrupted stage isn't counted** after a resume.
 - **No background Jenkins polling;** promotions need a manual refresh.
 - **No automatic post-release monitoring or rollback.**
 - **No JavaScript tests;** auth is API-key/JWT, not SSO; agents are not containerised.
@@ -328,4 +327,4 @@ A line to use: *"I'd rather tell you what I haven't verified than have you find 
 | Budgets | 900s, 150 tool calls, 60 model calls, 600k tokens per run (configurable); optional cost limit |
 | Model routing | Per-task profiles, retry, fallback, circuit breaker; keys by env var; no real provider tested |
 | Tests | ~600, hermetic; replay harness is a regression check, not an accuracy estimate |
-| Biggest unknown | Real-model behaviour |
+| Biggest unknown | Real incidents: only a few real-model runs, on scenarios I wrote |

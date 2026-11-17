@@ -11,7 +11,7 @@ from typing import Any, Callable
 from app.adapters.llm_client import LLMClient
 from app.agents.collector import collect_evidence, window_for
 from app.agents.evidence import EvidenceLedger, clean_text
-from app.agents.models import ISSUE_TYPES, Evidence, Hypothesis, IncidentContext, InvestigationReport
+from app.agents.models import ISSUE_TYPES, Evidence, Hypothesis, IncidentContext, InvestigationReport, tool_args
 from app.agents.prompts import FINAL_ANSWER_INSTRUCTION, INVESTIGATOR_SYSTEM_PROMPT
 from app.agents.scoring import Candidate, score_all
 from app.tools.base import ToolError
@@ -203,7 +203,7 @@ class Investigator:
         self, request: dict[str, Any], ctx: IncidentContext, tools: AgentTools, ledger: EvidenceLedger
     ) -> dict[str, Any]:
         tool, method = request.get("tool"), request.get("method")
-        args = request.get("args") if isinstance(request.get("args"), dict) else {}
+        args = tool_args(request)
         service = clean_text(str(args.get("service") or ctx.service), 80)
         try:
             minutes = min(240.0, max(5.0, float(args.get("minutes", 60))))

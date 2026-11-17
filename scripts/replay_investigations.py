@@ -17,9 +17,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from app.adapters.llm_client import OpenAICompatibleLLMClient  # noqa: E402
 from app.agents.investigator import Investigator  # noqa: E402
 from app.config import load_settings  # noqa: E402
+from app.services.integration_factory import build_llm_router  # noqa: E402
 from app.replay import run_replay  # noqa: E402
 
 
@@ -34,16 +34,12 @@ def main() -> int:
     settings = load_settings(str(ROOT))
     llm = None
     if args.mode == "llm":
-        if not settings.llm_api_key:
-            print("LLM_API_KEY is required for --mode llm", file=sys.stderr)
+        if not (settings.llm_api_key or settings.llm_routing_file):
+            print("LLM_API_KEY (or LLM_ROUTING_FILE) is required for --mode llm", file=sys.stderr)
             return 2
-        llm = OpenAICompatibleLLMClient(
-            base_url=settings.llm_base_url,
-            api_key=settings.llm_api_key,
-            model=settings.investigator_model or settings.llm_model,
-            timeout_seconds=settings.llm_timeout_seconds,
-            verify_ssl=settings.llm_verify_ssl,
-        )
+        # The same router the app uses, so transient provider errors are retried here too.
+        model = None if settings.llm_routing_file else (settings.investigator_model or settings.llm_model)
+        llm = build_llm_router(settings, model=model).client("investigator.reason")
 
     investigator = Investigator(
         llm=llm,

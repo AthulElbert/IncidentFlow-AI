@@ -329,3 +329,36 @@ def test_the_app_resumes_an_interrupted_run_when_it_starts_again(make_app):
     assert "no model is configured for the Fixer" in run["agent_run"]["escalation_reason"]  # it ran on, to its real end
     labels = [item["label"] for item in restarted_client.get(f"/v1/changes/{change_id}/review", headers=VIEWER).json()["timeline"]]
     assert "Run resumed after a restart" in labels
+
+
+# --- the same, on a real Postgres (runs when TEST_DATABASE_URL is set) ---------------------------------------
+
+
+@pytest.mark.skipif(not __import__("os").getenv("TEST_DATABASE_URL"), reason="TEST_DATABASE_URL not set")
+def test_a_run_killed_mid_way_resumes_from_a_real_postgres_checkpoint(tmp_path):
+    import os
+
+    url = os.environ["TEST_DATABASE_URL"]
+    h = build(tmp_path)
+
+    def process(fixer_replies=(), **replaced):
+        runtime = dataclasses.replace(h.runtime, _sandboxes={}, _budgets={}, _resumed=set(), fixer=_fixer(fixer_replies), **replaced)
+        checkpointing = build_checkpointing("postgres", database_url=url)
+        return AgentRunner(runtime, workers=1, checkpointer=checkpointing.saver), checkpointing
+
+    crashed, first = process(GOOD_FIX, verifier=Dying(h.runtime.verifier, "verify"))
+    with pytest.raises(Killed):
+        crashed.run_sync(h.change_id, "tester")
+    config = crashed._config(h.record())
+    first.close()  # the process is gone; only the database remains
+
+    restarted, second = process(GOOD_FIX)
+    try:
+        assert restarted.graph.get_state(config).next == ("verify",)
+        record = restarted.resume_sync(h.change_id)
+
+        assert record.agent_run_status == "ready_for_approval" and record.agent_run["resumes"] == 1
+        assert record.agent_run["budget"]["llm_calls"] == 4  # carried over from before the crash
+        assert restarted.graph.get_state(config).next == ()  # finished, so its saved progress was deleted
+    finally:
+        second.close()

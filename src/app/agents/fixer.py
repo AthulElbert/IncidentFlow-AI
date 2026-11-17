@@ -10,7 +10,7 @@ from typing import Any, Callable
 
 from app.adapters.llm_client import LLMClient
 from app.agents.evidence import clean_text
-from app.agents.models import Evidence, FixAttempt, FixProposal, Hypothesis, IncidentContext
+from app.agents.models import Evidence, FixAttempt, FixProposal, Hypothesis, IncidentContext, tool_args
 from app.agents.prompts import FIXER_FINAL_INSTRUCTION, FIXER_SYSTEM_PROMPT
 from app.agents.verifier import changed_paths
 from app.tools.base import ToolBudgetExceeded, ToolError, ToolNotPermitted
@@ -176,7 +176,7 @@ class Fixer:
 
     def _run_tool(self, request: dict[str, Any], tools: AgentTools, ctx_incident_id: str = "") -> dict[str, Any]:
         tool, method = request.get("tool"), request.get("method")
-        args = request.get("args") if isinstance(request.get("args"), dict) else {}
+        args = tool_args(request)
         try:
             if (tool, method) == ("sandbox", "list_files"):
                 files = tools.sandbox.list_files(str(args.get("subdir", "")))

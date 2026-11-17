@@ -5,6 +5,11 @@ of endpoints. A call tries them in order: a transient error (timeout, 429, 5xx) 
 with backoff, any other error moves on to the next endpoint, and an endpoint that keeps failing is skipped for
 a cooldown (a circuit breaker). Every physical call, retries included, is reported with its token usage and cost.
 
+When the provider says how long to wait (a rate limit's Retry-After or retryDelay), that wait is used instead of
+the backoff, up to `max_retry_after_seconds`. Such a response means "too many requests", not "this endpoint is
+broken", so it does not count towards the circuit breaker. A longer requested wait is not sat out: the call moves
+on to the next endpoint, or fails so the agent can fall back.
+
 Which model handles a task is decided by configuration and by facts the code knows (a retry of a failed fix can
 use a stronger model). No model is asked how hard its own task is.
 """
@@ -128,6 +133,7 @@ class LLMRouter:
     backoff_max_seconds: float = 8.0
     breaker_threshold: int = 3
     breaker_cooldown_seconds: float = 30.0
+    max_retry_after_seconds: float = 60.0
     sleep: Callable[[float], None] = time.sleep
     clock: Callable[[], float] = time.monotonic
     jitter: Callable[[], float] = random.random
@@ -207,12 +213,16 @@ class LLMRouter:
                 reply = endpoint.client.complete(messages, error_label)
             except Exception as exc:  # LLMError for anything the client understood; others are treated as final
                 error = exc
-                breaker.failure()
                 self._report(endpoint, profile, started, ok=False, error=str(exc))
                 transient = isinstance(exc, LLMError) and exc.transient
+                asked_wait = exc.retry_after if isinstance(exc, LLMError) and transient else None
+                if asked_wait is None:
+                    breaker.failure()  # a rate limit with a stated wait is not a broken endpoint
                 if not transient or attempt >= self.max_retries or not breaker.allow():
                     break
-                self.sleep(self._backoff(attempt))
+                if asked_wait is not None and asked_wait > self.max_retry_after_seconds:
+                    break  # too long to sit out inside an agent run; try the next endpoint or give up
+                self.sleep(asked_wait if asked_wait is not None else self._backoff(attempt))
                 continue
             breaker.success()
             self._report(endpoint, profile, started, ok=True, reply=reply)
@@ -320,7 +330,13 @@ def load_routing_file(path: str | Path, env: Mapping[str, str], max_retries: int
             raise RoutingConfigError(f"escalate_on_retry for '{profile}' needs 'attempt_gte' and 'use'")
         escalations[str(profile)] = Escalation(int(rule.get("attempt_gte", 2)), str(rule["use"]))
 
-    router = LLMRouter(endpoints, profiles, escalations, max_retries=int(raw.get("max_retries", max_retries)))
+    router = LLMRouter(
+        endpoints,
+        profiles,
+        escalations,
+        max_retries=int(raw.get("max_retries", max_retries)),
+        max_retry_after_seconds=float(raw.get("max_retry_after_seconds", 60.0)),
+    )
 
     # A profile marked local-only may never send its data to an endpoint outside our network.
     for profile in raw.get("local_only_profiles") or []:

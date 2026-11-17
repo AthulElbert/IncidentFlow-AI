@@ -134,6 +134,30 @@ def test_an_error_that_will_not_fix_itself_is_not_retried_and_keeps_its_own_mess
     assert backend.calls == 1 and sleeps == []
 
 
+def rate_limited(wait):
+    return LLMError("LLM API error 429: slow down", status=429, transient=True, retry_after=wait)
+
+
+def test_a_rate_limit_waits_as_long_as_the_provider_asks_and_does_not_count_as_a_broken_endpoint():
+    backend = FakeBackend(rate_limited(41), rate_limited(41), ok())
+    router, sleeps = make_router({"main": backend}, {"default": ["main"]}, max_retries=3, breaker_threshold=1)
+
+    assert router.client().complete_json([]) == {"answer": "yes"}
+
+    assert sleeps == [41, 41]  # the provider's wait, not the short backoff
+    assert router.status()["endpoints"]["main"]["circuit"] == "closed"  # a threshold of 1 would have opened it
+
+
+def test_a_requested_wait_too_long_for_an_agent_run_moves_on_instead_of_sitting_it_out():
+    primary, backup = FakeBackend(rate_limited(3600)), FakeBackend(ok({"from": "backup"}))
+    router, sleeps = make_router(
+        {"primary": primary, "backup": backup}, {"default": ["primary", "backup"]}, max_retry_after_seconds=60
+    )
+
+    assert router.client().complete_json([]) == {"from": "backup"}
+    assert primary.calls == 1 and sleeps == []
+
+
 def test_retries_stop_at_the_limit():
     backend = FakeBackend(transient())
     router, sleeps = make_router({"main": backend}, {"default": ["main"]}, max_retries=1, breaker_threshold=10)
@@ -455,6 +479,8 @@ def llm_server():
             self.send_response(state["status"])
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(payload)))
+            for name, value in state.get("headers", {}).items():
+                self.send_header(name, value)
             self.end_headers()
             self.wfile.write(payload)
 
@@ -498,14 +524,65 @@ def test_the_http_client_says_which_failures_are_worth_retrying(llm_server, stat
     assert raised.value.status == status and raised.value.transient is retryable
 
 
-def test_a_reply_that_is_not_the_json_we_asked_for_is_an_error_not_worth_retrying_as_is(llm_server):
+def test_the_http_client_reads_how_long_the_provider_wants_us_to_wait(llm_server):
     client = OpenAICompatibleLLMClient(llm_server["url"], "key", "m", timeout_seconds=5)
-    llm_server["body"] = _chat("this is not json")
+    llm_server["status"] = 429
+    llm_server["body"] = [{"error": {"code": 429, "details": [{"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "41s"}]}}]
+
+    with pytest.raises(LLMError) as from_body:
+        client.complete([])
+    llm_server["headers"], llm_server["body"] = {"Retry-After": "7"}, {"error": "slow down"}
+    with pytest.raises(LLMError) as from_header:
+        client.complete([])
+    llm_server["headers"], llm_server["status"] = {}, 500
+    with pytest.raises(LLMError) as unstated:
+        client.complete([])
+
+    assert from_body.value.retry_after == 41.0 and from_header.value.retry_after == 7.0 and unstated.value.retry_after is None
+
+
+def test_a_malformed_reply_is_worth_asking_again_and_is_described_briefly(llm_server):
+    client = OpenAICompatibleLLMClient(llm_server["url"], "key", "m", timeout_seconds=5)
+    # What Gemini actually sent once: a junk character, a filter reason, and a large opaque blob.
+    llm_server["body"] = {"choices": [{
+        "finish_reason": "function_call_filter: MALFORMED_FUNCTION_CALL",
+        "message": {"content": "ྀ", "extra_content": {"google": {"thought_signature": "E" * 5000}}},
+    }]}
 
     with pytest.raises(LLMError, match="Invalid fixer payload") as raised:
         client.complete([], error_label="fixer")
 
-    assert raised.value.transient is False
+    message = str(raised.value)
+    assert raised.value.transient is True
+    assert "MALFORMED_FUNCTION_CALL" in message and "thought_signature" not in message and len(message) < 300
+
+
+def test_a_reply_with_an_unexpected_shape_is_described_without_dumping_it(llm_server):
+    client = OpenAICompatibleLLMClient(llm_server["url"], "key", "m", timeout_seconds=5)
+    llm_server["body"] = {"unexpected": "x" * 5000}
+
+    with pytest.raises(LLMError, match="unexpected response shape") as raised:
+        client.complete([])
+
+    assert len(str(raised.value)) < 300
+
+
+def test_a_long_provider_error_body_is_cut(llm_server):
+    client = OpenAICompatibleLLMClient(llm_server["url"], "key", "m", timeout_seconds=5)
+    llm_server["status"], llm_server["body"] = 400, {"error": "y" * 5000}
+
+    with pytest.raises(LLMError) as raised:
+        client.complete([])
+
+    assert len(str(raised.value)) < 700
+
+
+def test_the_router_asks_again_after_a_malformed_reply():
+    malformed = LLMError("Invalid fixer payload: finish_reason='MALFORMED_FUNCTION_CALL'", transient=True)
+    backend = FakeBackend(malformed, ok({"action": "final"}))
+    router, _ = make_router({"main": backend}, {"default": ["main"]})
+
+    assert router.client().complete_json([]) == {"action": "final"} and backend.calls == 2
 
 
 def test_an_unreachable_endpoint_is_a_retryable_connection_error():
@@ -679,3 +756,59 @@ def test_the_status_endpoint_shows_routing_and_health_and_never_a_key(make_app, 
     assert body["endpoints"]["strong"] == {"model": "big", "local": False, "circuit": "closed"}
     assert "very-secret" not in status.text and "KEY_A" not in status.text
     assert client.post("/v1/incidents/mock", headers=APPROVER).status_code == 200  # the app still works end to end
+
+
+# --- what a real model actually sends (seen with Gemini flash-lite) ---------------------------------------
+
+
+@pytest.mark.parametrize(
+    "content,expected",
+    [
+        ('{"a": 1}', {"a": 1}),
+        ('---\n{"action": "final"}', {"action": "final"}),
+        ('```json\n{"a": 3}\n```', {"a": 3}),
+        ('Here you go: {"a": 4} hope that helps', {"a": 4}),
+        ('{"a": 5} {"b": 6}', {"a": 5}),
+    ],
+)
+def test_the_json_object_is_found_inside_what_models_wrap_around_it(content, expected):
+    from app.adapters.llm_client import parse_json_object
+
+    assert parse_json_object(content) == expected
+
+
+@pytest.mark.parametrize("content", ["no json here", "[1, 2]", "{broken", ""])
+def test_a_reply_with_no_usable_object_is_still_refused(content):
+    from app.adapters.llm_client import parse_json_object
+
+    with pytest.raises(ValueError):
+        parse_json_object(content)
+
+
+def test_tool_arguments_are_accepted_inside_args_or_beside_the_tool_name():
+    from app.agents.models import tool_args
+
+    assert tool_args({"action": "tool", "tool": "sandbox", "method": "grep", "args": {"pattern": "x"}}) == {"pattern": "x"}
+    assert tool_args({"action": "tool", "tool": "sandbox", "method": "grep", "pattern": "x", "subdir": ""}) == {"pattern": "x", "subdir": ""}
+    assert tool_args({"action": "tool", "tool": "sandbox", "method": "diff"}) == {}
+
+
+def test_a_fixer_whose_model_flattens_its_arguments_still_makes_the_fix(tmp_path):
+    flattened = [
+        {"action": "tool", "tool": "sandbox", "method": "read", "path": CONFIG_PATH},
+        {"action": "tool", "tool": "sandbox", "method": "edit", "path": CONFIG_PATH, "content": FIXED},
+        done("Lowered latency_ms"),
+    ]
+    h = build(tmp_path, flattened)
+
+    record = h.run()
+
+    assert record.agent_run_status == "ready_for_approval" and record.agent_run["changed_files"] == [CONFIG_PATH]
+
+
+def test_the_prompts_ask_for_the_bare_object_with_arguments_inside_args():
+    from app.agents.prompts import CRITIC_SYSTEM_PROMPT, FIXER_SYSTEM_PROMPT, INVESTIGATOR_SYSTEM_PROMPT
+
+    for prompt in (FIXER_SYSTEM_PROMPT, INVESTIGATOR_SYSTEM_PROMPT):
+        assert "no text, separator or code\nfence before or after it" in prompt and 'go inside "args"' in prompt
+    assert "nothing before or after it" in CRITIC_SYSTEM_PROMPT

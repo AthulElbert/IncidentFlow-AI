@@ -11,8 +11,9 @@ SRC_DIR = ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-from app.adapters.llm_client import OpenAICompatibleLLMClient
 from app.models.schemas import APMEvent
+from app.config import load_settings
+from app.services.integration_factory import build_llm_router
 from app.services.triage_agent import TriageAgent
 
 
@@ -42,16 +43,11 @@ def _build_agent(mode: str, confidence_floor: float) -> TriageAgent:
     if mode != "llm":
         return TriageAgent(mode="heuristic", llm_client=None, confidence_floor=confidence_floor)
 
-    api_key = os.getenv("LLM_API_KEY", "").strip()
-    if not api_key:
-        raise ValueError("LLM_API_KEY is required when --mode llm")
-    client = OpenAICompatibleLLMClient(
-        base_url=os.getenv("LLM_BASE_URL", "https://api.openai.com/v1"),
-        api_key=api_key,
-        model=os.getenv("LLM_MODEL", "gpt-4.1-mini"),
-        timeout_seconds=int(os.getenv("LLM_TIMEOUT_SECONDS", "20")),
-        verify_ssl=os.getenv("LLM_VERIFY_SSL", "true").strip().lower() in {"1", "true", "yes", "on"},
-    )
+    settings = load_settings()
+    if not (settings.llm_api_key or settings.llm_routing_file):
+        raise ValueError("LLM_API_KEY (or LLM_ROUTING_FILE) is required when --mode llm")
+    # The same router the app uses, so transient provider errors are retried here too.
+    client = build_llm_router(settings).client("triage")
     return TriageAgent(mode="llm", llm_client=client, confidence_floor=confidence_floor)
 
 
