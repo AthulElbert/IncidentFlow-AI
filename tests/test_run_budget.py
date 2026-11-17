@@ -37,7 +37,8 @@ def test_each_limit_is_reported_in_words_once_it_is_reached():
 
     models = RunBudget(BudgetLimits(max_llm_calls=1))
     models.spend_llm()
-    assert "1 model calls" in models.exceeded()
+    assert "1 model calls" in models.llm_limit_reached()
+    assert models.exceeded() is None  # stages that need no model may still run
     with pytest.raises(RunBudgetExceeded):
         models.spend_llm()
     assert models.llm_calls == 1  # a refused call is not counted
@@ -49,7 +50,8 @@ def test_usage_reports_what_was_spent_against_what_was_allowed():
     budget.spend_llm()
 
     assert budget.usage() == {
-        "seconds": 0.0, "tool_calls": 1, "llm_calls": 1, "limits": {"seconds": 30, "tool_calls": 5, "llm_calls": 4},
+        "seconds": 0.0, "tool_calls": 1, "llm_calls": 1, "tokens": 0, "cost": 0.0,
+        "limits": {"seconds": 30, "tool_calls": 5, "llm_calls": 4, "tokens": 0, "cost": 0.0},
     }
 
 

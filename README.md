@@ -159,6 +159,7 @@ Open:
 - `GET /v1/changes/{change_id}/review` (the case file a person decides from: diagnosis, evidence, verified diff, checks, Critic, policy result, which actions are open and why not, and a timeline)
 - `GET /v1/shadow/report` and `POST /v1/changes/{change_id}/shadow-run` (shadow mode)
 - `GET /v1/changes/{change_id}/postmortem` (postmortem draft, markdown)
+- `GET /v1/llm/status` (which model each task uses, and endpoint health)
 - `GET /v1/whoami` (the actor and role a key belongs to)
 - `GET /v1/changes/{change_id}/audit` (who did what to this change, oldest first)
 - `GET /v1/audit` (most recent audit entries across all changes)
@@ -195,9 +196,21 @@ Notes:
 - If `CODE_CHANGE_MODE=sandbox_git`, service creates/uses `.agent_worktrees/<branch>` and applies real file edits with path/size guardrails.
 - In scheduler mode (`APM_POLL_MODE=poll`), the app continuously polls alerts and applies dedup before processing.
 
+### LLM routing and fallback
+
+Every model call goes through a router. With only the `LLM_*` settings it is one endpoint with retries (`LLM_MAX_RETRIES`). Set `LLM_ROUTING_FILE` (see `ops/llm_routing.example.json`) to give each task its own ordered list of models:
+
+- **Profiles:** `default`, `triage`, `code_fix`, `investigator.reason`, `fixer.step`, `critic.review`. A task without a profile uses `default`.
+- **Fallback:** a timeout, 429 or 5xx is retried with backoff, then the next endpoint is tried; an endpoint that keeps failing is skipped for 30 seconds.
+- **Escalation:** `escalate_on_retry` can send a second fix attempt to a stronger model.
+- **Local-only tasks:** `local_only_profiles` refuses any route that leaves your network.
+- **Keys** are named by environment variable in the file, never written in it, and the file must sit outside the paths agents may edit.
+
+`GET /v1/llm/status` shows the routing and each endpoint's health. Token usage and cost of every call are recorded on the run and in the audit log (never the prompt or reply).
+
 ### Run budgets
 
-One run has limits on the whole: `AGENT_RUN_MAX_SECONDS` (900), `AGENT_RUN_MAX_TOOL_CALLS` (150, shared by all agents and attempts) and `AGENT_RUN_MAX_LLM_CALLS` (60, counted for the Fixer). They are checked before each stage, and a tool or model call past the limit is refused. Exceeding one escalates the change with the reason ("run budget exceeded: the run used its 900s time limit"); a fix that is already verified and reviewed is not thrown away because packaging ran past the clock. What a run used is recorded on it (`agent_run.budget`). Tokens are not counted because the model client does not report usage, and the Investigator's and Critic's model use is bounded by their own step limits.
+One run has limits on the whole: `AGENT_RUN_MAX_SECONDS` (900), `AGENT_RUN_MAX_TOOL_CALLS` (150, shared by all agents and attempts), `AGENT_RUN_MAX_LLM_CALLS` (60), `AGENT_RUN_MAX_TOKENS` (600,000) and `AGENT_RUN_MAX_COST` (0 = no limit). Time and tool calls are checked before each stage; a tool or model call past its limit is refused where it is attempted, so a fix that used the last model call is still verified. Exceeding one escalates the change with the reason ("run budget exceeded: the run used its 900s time limit"); a fix that is already verified and reviewed is not thrown away because packaging ran past the clock. What a run used is recorded on it (`agent_run.budget`). Tokens and cost are counted when the provider reports usage. Out of model budget, the Investigator answers from the evidence and the Critic reviews by its rules.
 
 ### Shadow mode
 

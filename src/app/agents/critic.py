@@ -11,7 +11,7 @@ that should stop the fix reaching them.
 import json
 import logging
 import re
-from typing import Any
+from typing import Any, Callable
 
 from app.adapters.llm_client import LLMClient
 from app.agents.evidence import clean_text
@@ -86,6 +86,7 @@ class Critic:
         proposal: FixProposal,
         verification: VerificationReport,
         tools: AgentTools,
+        llm_gate: Callable[[], None] | None = None,
     ) -> Review:
         warnings: list[str] = []
         concerns: list[Concern] = []
@@ -110,6 +111,8 @@ class Critic:
         mode = "rules"
         if self.llm is not None:
             try:
+                if llm_gate is not None:
+                    llm_gate()  # raises when the run has used its model budget; the rules-only review stands
                 concerns.extend(self._llm_concerns(ctx, investigation, verification, diff))
                 mode = "llm"
             except Exception as exc:  # advisory only: a failure never changes the outcome

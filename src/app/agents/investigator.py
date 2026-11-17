@@ -6,7 +6,7 @@ wording of the root cause. If it fails or contradicts the evidence, the evidence
 """
 import json
 import logging
-from typing import Any
+from typing import Any, Callable
 
 from app.adapters.llm_client import LLMClient
 from app.agents.collector import collect_evidence, window_for
@@ -69,7 +69,9 @@ class Investigator:
 
     # ------------------------------------------------------------------ public
 
-    def investigate(self, ctx: IncidentContext, tools: AgentTools) -> InvestigationReport:
+    def investigate(
+        self, ctx: IncidentContext, tools: AgentTools, llm_gate: Callable[[], None] | None = None
+    ) -> InvestigationReport:
         ledger = collect_evidence(ctx, tools)
         hypotheses = self._hypotheses(score_all(ledger.items), ledger)
         warnings = list(ledger.warnings)
@@ -77,7 +79,7 @@ class Investigator:
 
         if self.llm is not None:
             try:
-                hypotheses = self._reason_with_llm(ctx, tools, ledger, warnings)
+                hypotheses = self._reason_with_llm(ctx, tools, ledger, warnings, llm_gate)
                 mode = "llm"
             except Exception as exc:  # any model failure falls back to the evidence-based answer
                 logger.warning("investigator-llm-fallback", extra={"incident_id": ctx.incident_id, "error": str(exc)})
@@ -141,7 +143,12 @@ class Investigator:
     # --------------------------------------------------------------------- LLM
 
     def _reason_with_llm(
-        self, ctx: IncidentContext, tools: AgentTools, ledger: EvidenceLedger, warnings: list[str]
+        self,
+        ctx: IncidentContext,
+        tools: AgentTools,
+        ledger: EvidenceLedger,
+        warnings: list[str],
+        llm_gate: Callable[[], None] | None = None,
     ) -> list[Hypothesis]:
         assert self.llm is not None
         messages: list[dict] = [
@@ -151,6 +158,8 @@ class Investigator:
         requests_left = self.max_llm_steps
 
         for _ in range(self.max_llm_steps + 2):
+            if llm_gate is not None:
+                llm_gate()  # raises when the run has used its model budget; the evidence-based answer is then used
             reply = self.llm.complete_json(messages, error_label="investigator")
             action = reply.get("action")
 

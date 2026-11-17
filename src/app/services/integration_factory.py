@@ -4,7 +4,10 @@ from app.adapters.apm_client import HttpAPMClient, MockAPMClient
 from app.adapters.apm_alert_source import DynatraceAPMAlertSource, HttpAPMAlertSource, MockAPMAlertSource
 from app.adapters.jenkins_client import MockJenkinsClient, RealJenkinsClient
 from app.adapters.jira_client import MockJiraClient, RealJiraClient
-from app.adapters.llm_client import OpenAICompatibleLLMClient
+import os
+
+from app.adapters.llm_router import LLMRouter, ProfiledLLM, load_routing_file, single_endpoint_router
+from app.config import routing_file_path
 from app.adapters.pr_client import MockPRClient, RealGitHubPRClient
 from app.config import Settings
 
@@ -131,34 +134,46 @@ def build_llm_client(settings: Settings):
         return None, "heuristic"
 
     try:
-        client = OpenAICompatibleLLMClient(
-            base_url=settings.llm_base_url,
-            api_key=settings.llm_api_key,
-            model=settings.llm_model,
-            timeout_seconds=settings.llm_timeout_seconds,
-            verify_ssl=settings.llm_verify_ssl,
-        )
+        router = build_llm_router(settings)
     except Exception as exc:
         raise_unless_mock_fallback(settings, "LLM client", exc)
         return None, "heuristic-fallback-startup"
 
-    return client, ("llm" if settings.triage_mode == "llm" else "heuristic")
+    return router.client(), ("llm" if settings.triage_mode == "llm" else "heuristic")
 
 
-def build_agent_llm(settings: Settings, label: str, enabled: bool, model: str, shared_client):
-    """An agent may use its own model (its *_MODEL setting); otherwise it shares the main client."""
+def build_llm_router(settings: Settings, model: str | None = None) -> LLMRouter:
+    """The router every model call goes through: from the routing file if there is one, else the plain LLM_* settings."""
+    path = routing_file_path(settings)
+    if path is not None and model is None:
+        return load_routing_file(path, os.environ, settings.llm_max_retries)
+    return single_endpoint_router(
+        base_url=settings.llm_base_url,
+        api_key=settings.llm_api_key,
+        model=model or settings.llm_model,
+        timeout_seconds=settings.llm_timeout_seconds,
+        verify_ssl=settings.llm_verify_ssl,
+        max_retries=settings.llm_max_retries,
+    )
+
+
+def llm_for_profile(shared_client, profile: str):
+    """The client for one task. With a routing file the task gets its own profile; otherwise it shares the main client."""
+    if isinstance(shared_client, ProfiledLLM):
+        return shared_client.router.client(profile)
+    return shared_client
+
+
+def build_agent_llm(settings: Settings, label: str, enabled: bool, model: str, shared_client, profile: str = ""):
+    """An agent's model: its routing profile, or its own *_MODEL setting, or else the main client."""
     if not enabled:
         return None
+    if settings.llm_routing_file:
+        return llm_for_profile(shared_client, profile)
     if not model or model == settings.llm_model:
         return shared_client
     try:
-        return OpenAICompatibleLLMClient(
-            base_url=settings.llm_base_url,
-            api_key=settings.llm_api_key,
-            model=model,
-            timeout_seconds=settings.llm_timeout_seconds,
-            verify_ssl=settings.llm_verify_ssl,
-        )
+        return build_llm_router(settings, model=model).client()
     except Exception as exc:
         raise_unless_mock_fallback(settings, f"{label} LLM", exc)
         return None
@@ -166,16 +181,21 @@ def build_agent_llm(settings: Settings, label: str, enabled: bool, model: str, s
 
 def build_investigator_llm(settings: Settings, shared_client):
     return build_agent_llm(
-        settings, "Investigator", settings.investigator_mode == "llm", settings.investigator_model, shared_client
+        settings, "Investigator", settings.investigator_mode == "llm", settings.investigator_model, shared_client,
+        profile="investigator.reason",
     )
 
 
 def build_fixer_llm(settings: Settings, shared_client):
-    return build_agent_llm(settings, "Fixer", settings.fixer_mode == "llm", settings.fixer_model, shared_client)
+    return build_agent_llm(
+        settings, "Fixer", settings.fixer_mode == "llm", settings.fixer_model, shared_client, profile="fixer.step"
+    )
 
 
 def build_critic_llm(settings: Settings, shared_client):
-    return build_agent_llm(settings, "Critic", settings.critic_mode == "llm", settings.critic_model, shared_client)
+    return build_agent_llm(
+        settings, "Critic", settings.critic_mode == "llm", settings.critic_model, shared_client, profile="critic.review"
+    )
 
 
 def build_pr_client(settings: Settings):

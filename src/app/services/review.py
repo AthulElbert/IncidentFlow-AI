@@ -116,6 +116,21 @@ def _actor_name(actor: str) -> str:
     return ACTOR_NAMES.get(actor, actor)
 
 
+def _model_summary(group: list[AuditEntry]) -> str:
+    tokens = sum(int(e.details.get("prompt_tokens", 0)) + int(e.details.get("completion_tokens", 0)) for e in group)
+    cost = sum(float(e.details.get("cost", 0.0)) for e in group)
+    models = Counter(str(e.details.get("model", "?")) for e in group)
+    used = ", ".join(f"{name} x{count}" if count > 1 else name for name, count in models.items())
+    return f"{used}; {tokens} tokens" + (f"; cost {cost:.4f}" if cost else "")
+
+
+def _family(action: str) -> str:
+    """Audit actions that are folded into one timeline line per agent: tool calls and model calls."""
+    if action.startswith("tool."):
+        return "tools"
+    return "model" if action.startswith("llm.") else ""
+
+
 def _tool_summary(group: list[AuditEntry]) -> str:
     counts = Counter(entry.action.removeprefix("tool.").removesuffix(".denied") for entry in group)
     return ", ".join(f"{name} x{count}" if count > 1 else name for name, count in counts.items())
@@ -131,24 +146,26 @@ def build_timeline(entries: list[AuditEntry]) -> list[dict[str, Any]]:
             return
         denied = sum(1 for entry in group if entry.action.endswith(".denied"))
         failed = sum(1 for entry in group if entry.details.get("ok") is False)
-        label = f"used {len(group)} tool call{'s' if len(group) != 1 else ''}"
+        kind = _family(group[0].action)
+        plural = "s" if len(group) != 1 else ""
+        label = f"used {len(group)} tool call{plural}" if kind == "tools" else f"made {len(group)} model call{plural}"
         timeline.append(
             {
                 "at": group[0].occurred_at,
                 "actor": group[0].actor,
                 "actor_name": _actor_name(group[0].actor),
                 "actor_kind": _actor_kind(group[0].actor),
-                "kind": "tools",
+                "kind": kind,
                 "label": label,
-                "note": _tool_summary(group),
+                "note": _tool_summary(group) if kind == "tools" else _model_summary(group),
                 "problem": f"{denied} denied" if denied else (f"{failed} failed" if failed else ""),
             }
         )
         group.clear()
 
     for entry in entries:
-        if entry.action.startswith("tool."):
-            if group and group[0].actor != entry.actor:
+        if _family(entry.action):
+            if group and (group[0].actor != entry.actor or _family(group[0].action) != _family(entry.action)):
                 flush()
             group.append(entry)
             continue

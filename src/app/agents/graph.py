@@ -28,7 +28,8 @@ from app.agents.fixer import Fixer
 from app.agents.investigator import Investigator
 from app.agents.models import FixProposal, IncidentContext, InvestigationReport, VerificationReport
 from app.agents.verifier import Verifier
-from app.audit import AuditLog
+from app.adapters.llm_usage import LLMCall, llm_task
+from app.audit import AuditLog, new_audit_entry
 from app.services.change_control import ChangeControlStore
 from app.tools.instrumentation import ChainedBudget, ToolBudget, Toolkit
 from app.tools.sandbox import FileSandbox
@@ -38,6 +39,7 @@ logger = logging.getLogger("app.agent_graph")
 ORCHESTRATOR = "agent:orchestrator"
 VERIFIER_ACTOR = "agent:verifier"
 MAX_STORED_DIFF_CHARS = 40_000
+NODE_AGENTS = {"investigate": "investigator", "fix": "fixer", "verify": "verifier", "review": "critic"}
 
 
 def stored_diff(text: str) -> dict:
@@ -122,6 +124,35 @@ def build_incident_graph(runtime: AgentRuntime, checkpointer: Any | None = None)
         budget = ChainedBudget(ToolBudget(runtime.toolkit.max_calls_per_run), runtime.budget_for(change_id).tool_calls)
         return runtime.toolkit.for_agent(agent, entity_id=change_id, audit=runtime.audit, budget=budget, sandbox=sandbox)
 
+    def usage_sink(change_id: str, node_name: str) -> Callable[[LLMCall], None]:
+        actor = f"agent:{NODE_AGENTS.get(node_name, 'orchestrator')}"
+
+        def record(call: LLMCall) -> None:
+            runtime.budget_for(change_id).record_llm_usage(call)
+            if runtime.audit is not None:
+                runtime.audit.append(
+                    new_audit_entry(
+                        actor=actor,
+                        action="llm.call",
+                        entity_id=change_id,
+                        entity_type="incident",
+                        details={  # what it cost and where it went; never what was said
+                            "profile": call.profile,
+                            "endpoint": call.endpoint,
+                            "model": call.model,
+                            "ok": call.ok,
+                            "prompt_tokens": call.prompt_tokens,
+                            "completion_tokens": call.completion_tokens,
+                            "usage_reported": call.usage_reported,
+                            "cost": call.cost,
+                            "latency_ms": call.latency_ms,
+                            **({"error": call.error} if call.error else {}),
+                        },
+                    )
+                )
+
+        return record
+
     def guarded(name: str, node: Callable[[RunState], dict]) -> Callable[[RunState], dict]:
         def run(state: RunState) -> dict:
             try:
@@ -129,7 +160,9 @@ def build_incident_graph(runtime: AgentRuntime, checkpointer: Any | None = None)
                 limit = None if name == "package" else runtime.budget_for(state["change_id"]).exceeded()
                 if limit:
                     return escalate(state, ORCHESTRATOR, f"run budget exceeded: {limit}")
-                return node(state)
+                # Model calls made inside this node are counted against the run and written to the audit log.
+                with llm_task(sink=usage_sink(state["change_id"], name), attempt=int(state.get("attempt", 1))):
+                    return node(state)
             except Exception as exc:  # never leave the change stuck in a working state
                 logger.exception("agent-node-crashed", extra={"node": name, "change_id": state.get("change_id")})
                 return {"crashed": f"{name}: {type(exc).__name__}: {exc}"[:300]}
@@ -147,7 +180,7 @@ def build_incident_graph(runtime: AgentRuntime, checkpointer: Any | None = None)
         change_id = state["change_id"]
         ctx = IncidentContext(**state["ctx"])
         tools = tools_for("investigator", change_id)
-        report = runtime.investigator.investigate(ctx, tools)
+        report = runtime.investigator.investigate(ctx, tools, llm_gate=runtime.budget_for(change_id).spend_llm)
         dump = report.model_dump(mode="json")
         top = report.top
         fields = {"issue_type": top.issue_type, "confidence": top.confidence} if top else {}
@@ -241,7 +274,10 @@ def build_incident_graph(runtime: AgentRuntime, checkpointer: Any | None = None)
 
         store.record_agent_step(change_id, ORCHESTRATOR, "reviewing", "agent.reviewing", {"attempts": state["attempts"]})
         tools = tools_for("critic", change_id, sandbox)
-        review_ = runtime.critic.review(ctx, investigation, FixProposal(**state["proposal"]), verification, tools)
+        review_ = runtime.critic.review(
+            ctx, investigation, FixProposal(**state["proposal"]), verification, tools,
+            llm_gate=runtime.budget_for(change_id).spend_llm,
+        )
         dump = review_.model_dump(mode="json")
         attempts = [dict(item) for item in state["attempts"]]
         attempts[-1]["review"] = {

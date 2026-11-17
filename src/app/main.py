@@ -46,6 +46,7 @@ from app.services.integration_factory import (
     build_jenkins_client,
     build_jira_client,
     build_llm_client,
+    llm_for_profile,
     build_pr_client,
 )
 from app.services.learning import OutcomeLearner
@@ -119,7 +120,7 @@ llm_client, triage_mode = build_llm_client(settings)
 pr_client, pr_mode = build_pr_client(settings)
 triage_agent = TriageAgent(
     mode=settings.triage_mode,
-    llm_client=llm_client,
+    llm_client=llm_for_profile(llm_client, "triage"),
     confidence_floor=settings.triage_confidence_floor,
 )
 dev_executor = DevFixExecutor(
@@ -136,7 +137,7 @@ build_tracker = BuildTracker(
     dev_executor=dev_executor,
 )
 code_fix_agent = CodeFixAgent(
-    llm_client=llm_client,
+    llm_client=llm_for_profile(llm_client, "code_fix"),
     max_latency_ms=settings.code_fix_max_latency_ms,
     max_error_probability=settings.code_fix_max_error_probability,
 )
@@ -223,6 +224,8 @@ agent_runtime = AgentRuntime(
         max_seconds=settings.agent_run_max_seconds,
         max_tool_calls=settings.agent_run_max_tool_calls,
         max_llm_calls=settings.agent_run_max_llm_calls,
+        max_tokens=settings.agent_run_max_tokens,
+        max_cost=settings.agent_run_max_cost,
     ),
 )
 agent_runner = AgentRunner(agent_runtime, workers=settings.agent_run_workers)
@@ -428,6 +431,14 @@ def process_mock_incident(
 def list_changes(status: str | None = Query(default=None), principal: Principal = Depends(viewer_auth)) -> list[ChangeRecord]:
     _ = principal
     return change_store.list_changes(status=status)
+
+
+@app.get("/v1/llm/status")
+def llm_status(principal: Principal = Depends(viewer_auth)) -> dict:
+    """Which model each task uses and whether each endpoint is healthy. Contains no keys."""
+    _ = principal
+    router = getattr(llm_client, "router", None)
+    return {"configured": router is not None, **(router.status() if router is not None else {})}
 
 
 @app.get("/v1/whoami")

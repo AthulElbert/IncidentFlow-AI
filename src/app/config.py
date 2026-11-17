@@ -158,6 +158,10 @@ class Settings:
     agent_run_max_seconds: float = 900.0
     agent_run_max_tool_calls: int = 150
     agent_run_max_llm_calls: int = 60
+    agent_run_max_tokens: int = 600_000
+    agent_run_max_cost: float = 0.0
+    llm_routing_file: str = ""
+    llm_max_retries: int = 2
 
 
 _TOOL_MODES = {
@@ -179,6 +183,32 @@ class ConfigError(ValueError):
     """Raised at startup when the configuration is unsafe or inconsistent."""
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def agent_editable_prefix(settings: "Settings", path: Path | None) -> str:
+    """The agent-editable path prefix that contains `path`, or '' if none does (or it is outside the repo)."""
+    if path is None:
+        return ""
+    try:
+        relative = normalize_rel_path(path.resolve().relative_to(PROJECT_ROOT).as_posix())
+    except ValueError:
+        return ""
+    for part in settings.code_change_allowed_paths.split(","):
+        prefix = normalize_rel_path(part.strip()).rstrip("/")
+        if prefix and (relative == prefix or relative.startswith(prefix + "/")):
+            return prefix + "/"
+    return ""
+
+
+def routing_file_path(settings: "Settings") -> Path | None:
+    """Where the LLM routing file is, if one is configured. A relative path is relative to the repo root."""
+    if not settings.llm_routing_file:
+        return None
+    path = Path(settings.llm_routing_file)
+    return path if path.is_absolute() else PROJECT_ROOT / path
+
+
 def validate_settings(settings: "Settings") -> None:
     errors: list[str] = []
 
@@ -196,14 +226,44 @@ def validate_settings(settings: "Settings") -> None:
             errors.append(f"{env_name} must be one of {sorted(allowed_modes)}, got '{value}'")
     if settings.logs_mode == "file" and not settings.logs_file_path:
         errors.append("LOGS_MODE=file requires LOGS_FILE_PATH")
-    if settings.investigator_mode == "llm" and not settings.llm_api_key:
+    # With a routing file, each endpoint names its own key; LLM_API_KEY is then not required.
+    has_llm_credentials = bool(settings.llm_api_key or settings.llm_routing_file)
+    if settings.llm_routing_file:
+        own_models = [
+            name
+            for name, value in (
+                ("INVESTIGATOR_MODEL", settings.investigator_model),
+                ("FIXER_MODEL", settings.fixer_model),
+                ("CRITIC_MODEL", settings.critic_model),
+            )
+            if value
+        ]
+        if own_models:
+            errors.append(f"LLM_ROUTING_FILE and {', '.join(own_models)} both choose models; use the routing file's profiles only")
+        editable = agent_editable_prefix(settings, routing_file_path(settings))
+        if editable:
+            errors.append(
+                f"LLM_ROUTING_FILE is inside '{editable}', which agents may edit (CODE_CHANGE_ALLOWED_PATHS); "
+                "keep platform configuration outside those paths"
+            )
+        try:
+            from app.adapters.llm_router import load_routing_file
+
+            load_routing_file(routing_file_path(settings), os.environ, settings.llm_max_retries)
+        except ValueError as exc:
+            errors.append(f"LLM_ROUTING_FILE: {exc}")
+    if not 0 <= settings.llm_max_retries <= 5:
+        errors.append("LLM_MAX_RETRIES must be between 0 and 5")
+    if settings.agent_run_max_tokens < 0 or settings.agent_run_max_cost < 0:
+        errors.append("AGENT_RUN_MAX_TOKENS and AGENT_RUN_MAX_COST cannot be negative (0 means no limit)")
+    if settings.investigator_mode == "llm" and not has_llm_credentials:
         errors.append("INVESTIGATOR_MODE=llm requires LLM_API_KEY")
     if not 0.0 < settings.investigation_min_confidence <= 1.0:
         errors.append("INVESTIGATION_MIN_CONFIDENCE must be in (0, 1]")
     if not 0.0 <= settings.investigation_min_margin < 1.0:
         errors.append("INVESTIGATION_MIN_MARGIN must be in [0, 1)")
     for env_name, active in (("FIXER_MODE", settings.fixer_mode == "llm"), ("CRITIC_MODE", settings.critic_mode == "llm")):
-        if active and not settings.llm_api_key:
+        if active and not has_llm_credentials:
             errors.append(f"{env_name}=llm requires LLM_API_KEY")
     if not 1 <= settings.agent_max_fix_attempts <= 5:
         errors.append("AGENT_MAX_FIX_ATTEMPTS must be between 1 and 5")
@@ -225,7 +285,7 @@ def validate_settings(settings: "Settings") -> None:
         errors.append("VERIFIER_SOAK_MINUTES and VERIFIER_DEPLOY_WAIT_SECONDS must be positive")
 
     if settings.code_fix_mode == "llm":
-        if not settings.llm_api_key:
+        if not has_llm_credentials:
             errors.append("CODE_FIX_MODE=llm requires LLM_API_KEY")
         if settings.code_change_mode == "sandbox_git":
             target = normalize_rel_path(settings.code_fix_target_path)
@@ -371,4 +431,8 @@ def load_settings(base_dir: str | None = None) -> Settings:
         agent_run_max_seconds=_as_float(os.getenv("AGENT_RUN_MAX_SECONDS"), default=900.0),
         agent_run_max_tool_calls=_as_int(os.getenv("AGENT_RUN_MAX_TOOL_CALLS"), default=150),
         agent_run_max_llm_calls=_as_int(os.getenv("AGENT_RUN_MAX_LLM_CALLS"), default=60),
+        agent_run_max_tokens=_as_int(os.getenv("AGENT_RUN_MAX_TOKENS"), default=600_000),
+        agent_run_max_cost=_as_float(os.getenv("AGENT_RUN_MAX_COST"), default=0.0),
+        llm_routing_file=os.getenv("LLM_ROUTING_FILE", "").strip(),
+        llm_max_retries=_as_int(os.getenv("LLM_MAX_RETRIES"), default=2),
     )

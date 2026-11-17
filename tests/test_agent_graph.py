@@ -222,7 +222,7 @@ def test_an_inconclusive_verification_is_escalated_without_retrying(tmp_path):
 
 def test_a_critic_block_escalates_even_after_a_passed_verification(tmp_path):
     h = build(tmp_path, [edit(CONFIG_PATH, FIXED), done()])
-    h.runtime.critic.review = lambda ctx, inv, prop, ver, tools: Review(  # type: ignore[method-assign]
+    h.runtime.critic.review = lambda ctx, inv, prop, ver, tools, **_: Review(  # type: ignore[method-assign]
         incident_id=ctx.incident_id, decision="block", risk="high", feedback_for_fixer="- looks like a workaround",
     )
 

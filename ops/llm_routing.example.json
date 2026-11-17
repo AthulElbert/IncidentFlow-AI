@@ -1,0 +1,34 @@
+{
+  "endpoints": {
+    "strong": {
+      "base_url": "https://api.openai.com/v1",
+      "model": "gpt-4.1",
+      "api_key_env": "LLM_API_KEY",
+      "price_per_mtok": [2.0, 8.0],
+      "timeout_seconds": 30
+    },
+    "cheap": {
+      "base_url": "https://api.openai.com/v1",
+      "model": "gpt-4.1-mini",
+      "api_key_env": "LLM_API_KEY",
+      "price_per_mtok": [0.4, 1.6]
+    },
+    "local": {
+      "base_url": "http://localhost:11434/v1",
+      "model": "llama3.1",
+      "local": true
+    }
+  },
+  "profiles": {
+    "default": ["cheap", "strong"],
+    "triage": ["local", "cheap"],
+    "investigator.reason": ["strong", "cheap"],
+    "fixer.step": ["cheap", "strong"],
+    "critic.review": ["strong", "cheap"]
+  },
+  "escalate_on_retry": {
+    "fixer.step": { "attempt_gte": 2, "use": "strong" }
+  },
+  "local_only_profiles": [],
+  "max_retries": 2
+}
