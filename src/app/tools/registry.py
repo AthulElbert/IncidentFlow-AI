@@ -29,6 +29,7 @@ class Arg:
     max_length: int | None = None
     minimum: float | None = None
     maximum: float | None = None
+    choices: tuple[str, ...] = ()  # a string argument must be one of these, when given
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,9 @@ def _spec(tool, method, effect, agents, model_agents=(), args=(), example=None) 
 _SERVICE = Arg("service", "string", max_length=80)
 _MINUTES = Arg("minutes", "number", minimum=5, maximum=240)
 
+# Kept here rather than imported from app.agents.models, which imports this module. A test keeps the two equal.
+_ISSUE_TYPES = ("application_error", "performance_degradation", "dependency_failure", "resource_saturation")
+
 REGISTRY: tuple[ToolSpec, ...] = (
     # --- production telemetry (read) --------------------------------------------------------------
     _spec("metrics", "available_metrics", "read", {"investigator", "verifier"}),
@@ -65,7 +69,8 @@ REGISTRY: tuple[ToolSpec, ...] = (
     _spec("deploys", "recent", "read", {"investigator", "critic"}, {"investigator"},
           [_MINUTES, _SERVICE], {"minutes": 180}),
     _spec("memory", "search", "read", {"investigator", "fixer", "critic"}, {"investigator", "fixer"},
-          [Arg("text", "string", required=True, max_length=300), _SERVICE],
+          [Arg("text", "string", required=True, max_length=300), _SERVICE,
+           Arg("issue_type", "string", choices=_ISSUE_TYPES)],
           {"text": "connection pool exhausted"}),
     # --- the worktree ---------------------------------------------------------------------------------
     _spec("sandbox", "list_files", "read", {"fixer", "verifier", "critic"}, {"fixer"},
@@ -152,6 +157,8 @@ def validate_args(spec: ToolSpec, raw: dict[str, Any]) -> dict[str, Any]:
                 raise ToolRequestError(f"{spec.id}: '{arg.name}' must be a string")
             if arg.max_length is not None and len(value) > arg.max_length:
                 raise ToolRequestError(f"{spec.id}: '{arg.name}' is longer than {arg.max_length} characters")
+            if arg.choices and value not in arg.choices:
+                raise ToolRequestError(f"{spec.id}: '{arg.name}' must be one of {', '.join(arg.choices)}")
         else:
             if isinstance(value, bool) or not isinstance(value, (int, float)):
                 try:

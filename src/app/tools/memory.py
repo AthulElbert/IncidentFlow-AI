@@ -16,11 +16,17 @@ _MIN_SCORE = 0.08
 
 class IncidentMemory(Protocol):
     def search(
-        self, text: str, service: str | None = None, k: int = 3, exclude_ids: list[str] | None = None
+        self,
+        text: str,
+        service: str | None = None,
+        k: int = 3,
+        exclude_ids: list[str] | None = None,
+        issue_type: str | None = None,
     ) -> list[ScoredIncident]:
         """Resolved past incidents most relevant to `text`, best first, each with why it matched.
 
-        `exclude_ids` keeps the incident being investigated out of its own evidence.
+        `exclude_ids` keeps the incident being investigated out of its own evidence. `issue_type` keeps only
+        incidents of that type (an agent testing one hypothesis).
         """
         ...
 
@@ -39,8 +45,8 @@ def _document(record: IncidentRecord) -> str:
 class LexicalIncidentMemory:
     """TF-IDF cosine similarity over past incidents, boosted when the service matches.
 
-    A stand-in for embedding search with the same interface: when pgvector and an
-    embedder are available they replace this class and nothing that calls it changes.
+    The default. `HybridIncidentMemory` (MEMORY_MODE=hybrid) has the same interface and adds search by meaning
+    with pgvector; nothing that calls memory changes.
     Every result lists the terms that matched, so a reader can see why it ranked.
     """
 
@@ -48,12 +54,20 @@ class LexicalIncidentMemory:
         self._records = records
 
     def search(
-        self, text: str, service: str | None = None, k: int = 3, exclude_ids: list[str] | None = None
+        self,
+        text: str,
+        service: str | None = None,
+        k: int = 3,
+        exclude_ids: list[str] | None = None,
+        issue_type: str | None = None,
     ) -> list[ScoredIncident]:
         excluded = set(exclude_ids or [])
         # Only incidents someone actually resolved can say anything about a resolution; the pipeline files
         # every new incident with a placeholder, and those labels came from the keyword classifier.
-        records = [r for r in self._records() if r.incident_id not in excluded and r.reusable]
+        records = [
+            r for r in self._records()
+            if r.incident_id not in excluded and r.reusable and (issue_type is None or r.issue_type == issue_type)
+        ]
         query_terms = Counter(_tokens(text))
         if not records or not query_terms:
             return []

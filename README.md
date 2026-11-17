@@ -260,7 +260,20 @@ Incident memory only offers incidents that someone actually resolved. Every inci
 
 When a change reaches `promoted_to_prod` or `closed_rejected`, a background consumer on the event bus (plus a sweep at startup, in case events were lost in a restart) updates its incident. A resolved incident's `resolution` is written from the change's facts: what was changed, the dev before/after alert metric, who approved and who released it. No model writes it. Learning the same outcome twice changes nothing.
 
-`GET /v1/changes/{id}/postmortem` returns a markdown postmortem draft built from the same records (summary, diagnosis and the evidence behind it, the diff, verification, decisions, timeline) with a checklist of judgement calls left to the people involved. The dashboard shows it for finished changes. `/v1/metrics/summary` also reports how the agents are doing: runs, share ending in a verified fix, escalation rate, human override rate and average run time.
+`GET /v1/changes/{id}/postmortem` returns a markdown postmortem draft built from the same records (summary, diagnosis and the evidence behind it, the diff, verification, decisions, timeline) with a checklist of judgement calls left to the people involved. The dashboard shows it for finished changes. Once the change is closed, a person (approver role) can finalise their edited version with `PUT /v1/changes/{id}/postmortem` (`{"markdown": "..."}`), audited as `postmortem.finalized`; from then on `GET` returns the finalised version.
+
+### Hybrid incident memory (pgvector)
+
+`MEMORY_MODE=hybrid` replaces the TF-IDF memory with search by meaning and by words on Postgres with pgvector, behind the same interface, so no agent changes.
+
+- **What is remembered:** each resolved incident's resolution, plus the diagnosis, change, checks and lessons sections of its **finalised** postmortem (never a machine draft). Indexed at startup for anything missing, when an outcome is learned, and when a postmortem is finalised. An embedding outage is logged and never blocks either.
+- **How it searches:** nearest vectors (HNSW, cosine) and Postgres full-text search find candidates, reciprocal rank fusion orders them, and **meaning decides whether one counts**: the score is the cosine rescaled above `MEMORY_SEMANTIC_FLOOR`, so shared words alone never make an incident "similar". Each match says why (similar in meaning, shares words, from a postmortem, same service).
+- **Agents** may narrow a search by `issue_type` (one of the known types; anything else is refused).
+- **Checked with** `scripts/eval_memory.py`: 9 queries describing a past incident in other words, and 4 about things no past incident covers. With Gemini `gemini-embedding-001`: lexical found the right incident for 2 of 9; hybrid at the default floor for 9 of 9, the right one first each time, and matched none of the 4 unrelated queries. The same on pgvector as in memory. The set is small and was written with the code, so this chose the floor; it is not an accuracy figure.
+
+```bash
+PYTHONPATH=src python scripts/eval_memory.py --embedder real --show
+``` `/v1/metrics/summary` also reports how the agents are doing: runs, share ending in a verified fix, escalation rate, human override rate and average run time.
 
 ## Dashboard Demo
 

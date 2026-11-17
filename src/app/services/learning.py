@@ -11,6 +11,7 @@ same outcome twice must change nothing.
 """
 import logging
 from datetime import datetime, timezone
+from typing import Callable
 
 from app.events.bus import INCIDENT_EVENTS_TOPIC, Event, EventBus, drain
 from app.models.schemas import ChangeRecord, IncidentRecord
@@ -52,10 +53,17 @@ def resolution_text(record: ChangeRecord) -> str:
 
 
 class OutcomeLearner:
-    def __init__(self, change_store: ChangeControlStore, kb: IncidentKnowledgeBase, bus: EventBus | None = None) -> None:
+    def __init__(
+        self,
+        change_store: ChangeControlStore,
+        kb: IncidentKnowledgeBase,
+        bus: EventBus | None = None,
+        on_learned: Callable[[str], object] | None = None,
+    ) -> None:
         self.change_store = change_store
         self.kb = kb
         self.bus = bus
+        self.on_learned = on_learned  # given the incident id once an outcome is written (hybrid memory indexes it)
 
     def learn(self, change_id: str) -> str | None:
         """Record this change's outcome on its incident. Returns the outcome written, or None if there was nothing to do."""
@@ -77,6 +85,8 @@ class OutcomeLearner:
             updated = incident.model_copy(update={"outcome": "rejected", "outcome_at": now, "outcome_note": note[:400]})
         self.kb.update_record(updated)
         logger.info("outcome-learned", extra={"change_id": change_id, "incident_id": incident.incident_id, "outcome": updated.outcome})
+        if self.on_learned is not None and updated.outcome == "resolved":
+            self.on_learned(incident.incident_id)
         return updated.outcome
 
     def reconcile(self) -> list[str]:

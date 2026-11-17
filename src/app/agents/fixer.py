@@ -196,7 +196,9 @@ class Fixer:
             if spec.id == "sandbox.diff":
                 return {"diff": tools.sandbox.diff()[:MAX_READ_CHARS]}
             if spec.id == "memory.search":
-                found = tools.memory.search(clean_text(args["text"], 300), k=3, exclude_ids=[ctx_incident_id])
+                found = tools.memory.search(
+                    clean_text(args["text"], 300), k=3, exclude_ids=[ctx_incident_id], issue_type=args.get("issue_type")
+                )
                 return {
                     "matches": [
                         {"incident_id": m.incident_id, "issue_type": m.issue_type, "resolution": clean_text(m.resolution, 200)}

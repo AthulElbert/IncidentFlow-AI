@@ -27,6 +27,7 @@ from app.models.schemas import (
     MetricsSummary,
     PRPrepareRequest,
     PRPrepareResponse,
+    PostmortemFinalizeRequest,
     PromoteRequest,
     PromoteResponse,
 )
@@ -48,6 +49,7 @@ from app.services.integration_factory import (
     build_llm_client,
     llm_for_profile,
     build_pr_client,
+    raise_unless_mock_fallback,
 )
 from app.services.learning import OutcomeLearner
 from app.services.metrics import build_metrics_summary
@@ -60,7 +62,9 @@ from app.services.scheduler import AlertDedupStore, IncidentScheduler
 from app.services.triage_agent import TriageAgent
 from app.storage import atomic_write_text
 from app.replay import event_for
-from app.tools.factory import build_toolkit
+from app.tools.factory import build_memory, build_toolkit
+from app.tools.memory import LexicalIncidentMemory
+from app.services.memory_indexer import MemorySync
 from app.tools.scenarios import DEFAULT_SCENARIOS
 from app.agents.budget import BudgetLimits
 from app.agents.checkpoint import build_checkpointing
@@ -173,6 +177,17 @@ pipeline = SupportAgentPipeline(
     database_url=settings.database_url,
 )
 
+# Incident memory. Hybrid memory (pgvector) is fed by an indexer: at startup for anything not yet indexed, when an
+# outcome is learned, and when a person finalises a postmortem.
+try:
+    incident_memory, memory_indexer, memory_mode = build_memory(settings, pipeline.kb.all_records)
+except Exception as exc:
+    raise_unless_mock_fallback(settings, "Incident memory (pgvector)", exc)
+    incident_memory, memory_indexer, memory_mode = LexicalIncidentMemory(pipeline.kb.all_records), None, "lexical-fallback-startup"
+memory_sync = MemorySync(memory_indexer, pipeline.kb, change_store) if memory_indexer is not None else None
+if memory_sync is not None:
+    memory_sync.sync_all()
+
 # The tool layer the agent workflow will use (Phases 3+). Built now so a bad tool
 # configuration fails at startup rather than in the middle of an incident.
 toolkit, sandbox_provider, tool_modes = build_toolkit(
@@ -181,6 +196,8 @@ toolkit, sandbox_provider, tool_modes = build_toolkit(
     incident_records=pipeline.kb.all_records,
     jenkins_client=jenkins_client,
     base_dir=base_dir,
+    memory=incident_memory,
+    memory_mode=memory_mode,
 )
 
 investigator = Investigator(
@@ -248,7 +265,9 @@ if run_recovery["resumed"] or run_recovery["escalated"]:
     logger.info("agent-runs-recovered", extra=run_recovery)
 
 # What happened to a change becomes what incident memory knows. The sweep covers events the bus lost in a restart.
-outcome_learner = OutcomeLearner(change_store, pipeline.kb, consumer_bus)
+outcome_learner = OutcomeLearner(
+    change_store, pipeline.kb, consumer_bus, on_learned=memory_sync.incident if memory_sync is not None else None
+)
 outcome_learner.reconcile()
 learning_loop = ConsumerLoop("learning", outcome_learner.run_once, interval_seconds=2.0)
 relay_loop = (
@@ -496,7 +515,29 @@ def get_change_postmortem(change_id: str, principal: Principal = Depends(viewer_
         raise HTTPException(status_code=404, detail="Change not found")
     entries = audit_log.list(entity_id=change_id, limit=500)
     review = jsonable_encoder(build_review(record, entries, change_store, settings.agent_run_mode))
-    return {"change_id": change_id, "final": review["terminal"], "markdown": build_postmortem(record, review)}
+    pm = record.postmortem or {}
+    if pm.get("markdown"):
+        # The version a person finalised is the postmortem; the draft is only where it started.
+        return {"change_id": change_id, "final": True, "finalized": True, "markdown": pm["markdown"],
+                "finalized_by": pm.get("finalized_by"), "finalized_at": pm.get("finalized_at"), "revision": pm.get("revision")}
+    return {"change_id": change_id, "final": review["terminal"], "finalized": False, "markdown": build_postmortem(record, review)}
+
+
+@app.put("/v1/changes/{change_id}/postmortem")
+def finalize_change_postmortem(
+    change_id: str, payload: PostmortemFinalizeRequest, principal: Principal = Depends(approver_auth)
+) -> dict:
+    """A person signs off the postmortem. Its sections become searchable incident memory if the incident was resolved."""
+    try:
+        record = change_store.finalize_postmortem(change_id, payload.markdown, actor=principal.actor)
+    except ConcurrentModificationError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        status = 404 if str(exc) == "Change not found" else 409
+        raise HTTPException(status_code=status, detail=str(exc)) from exc
+    indexed = memory_sync.incident(record.incident_id) if memory_sync is not None else 0
+    return {"change_id": change_id, "revision": record.postmortem["revision"], "finalized_by": record.postmortem["finalized_by"],
+            "memory_documents": indexed}
 
 
 @app.get("/v1/metrics/summary", response_model=MetricsSummary)

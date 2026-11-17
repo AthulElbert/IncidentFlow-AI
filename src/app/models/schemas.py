@@ -170,6 +170,8 @@ class ChangeRecord(BaseModel):
     promotion_result: Literal["queued", "success", "failed"] | None = None
     prod_deploy_url: str | None = None
     promotion_key: str | None = None
+    # The postmortem a person finalised: {"markdown", "finalized_by", "finalized_at", "revision"}. Empty until then.
+    postmortem: dict[str, Any] = Field(default_factory=dict)
 
 
 class ApprovalDecisionRequest(BaseModel):
@@ -223,6 +225,12 @@ class PRPrepareResponse(BaseModel):
 
 class PromoteRequest(BaseModel):
     comment: str = ""
+
+
+class PostmortemFinalizeRequest(BaseModel):
+    """The postmortem as a person wrote it, usually the generated draft edited. Markdown, `## ` sections."""
+
+    markdown: str = Field(min_length=20, max_length=40_000)
 
 
 class PromoteResponse(BaseModel):

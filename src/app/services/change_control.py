@@ -510,6 +510,25 @@ class ChangeControlStore:
         details = {**({"reason": escalation_reason} if escalation_reason else {}), **({"note": note} if note else {})}
         return self._mutate(change_id, apply, action=f"shadow.{action}", actor=actor, details=details)
 
+    # A postmortem is about what happened, so it can only be finalised once nothing more will happen.
+    POSTMORTEM_STATES = frozenset({"promoted_to_prod", "prod_promotion_failed", "closed_rejected", "rolled_back", "resolved"})
+
+    def finalize_postmortem(self, change_id: str, markdown: str, actor: str) -> ChangeRecord:
+        """Store the postmortem a person signed off. Finalising again replaces it and bumps its revision."""
+
+        def apply(record: ChangeRecord) -> ChangeRecord:
+            if record.deployment_state not in self.POSTMORTEM_STATES:
+                raise ValueError(f"A postmortem can only be finalised once the change is closed (it is {record.deployment_state})")
+            postmortem = {
+                "markdown": markdown,
+                "finalized_by": actor,
+                "finalized_at": datetime.now(timezone.utc).isoformat(),
+                "revision": int(record.postmortem.get("revision", 0)) + 1,
+            }
+            return record.model_copy(update={"postmortem": postmortem})
+
+        return self._mutate(change_id, apply, action="postmortem.finalized", actor=actor, details={"chars": len(markdown)})
+
     def finish_shadow_run(self, change_id: str, actor: str, patch: dict | None = None) -> ChangeRecord:
         def apply(record: ChangeRecord) -> ChangeRecord:
             if record.shadow.get("status") != "running":

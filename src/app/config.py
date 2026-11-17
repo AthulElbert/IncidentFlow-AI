@@ -174,6 +174,13 @@ class Settings:
     checkpoint_sqlite_file: str = ""
     agent_run_max_resumes: int = 2
     llm_max_retries: int = 2
+    memory_mode: str = "lexical"
+    embedding_mode: str = "openai"
+    embedding_base_url: str = ""
+    embedding_model: str = "gemini-embedding-001"
+    embedding_api_key_env: str = "LLM_API_KEY"
+    embedding_dimensions: int = 768
+    memory_semantic_floor: float = 0.5
 
 
 _TOOL_MODES = {
@@ -189,6 +196,8 @@ _TOOL_MODES = {
     "EVENT_BUS_MODE": ("event_bus_mode", {"auto", "kafka"}),
     "CHECKPOINT_BACKEND": ("checkpoint_backend", {"memory", "sqlite", "postgres"}),
     "SANDBOX_EXEC": ("sandbox_exec", {"host", "container"}),
+    "MEMORY_MODE": ("memory_mode", {"lexical", "hybrid"}),
+    "EMBEDDING_MODE": ("embedding_mode", {"openai", "hashing"}),
     "MOCK_DEV_EFFECT": ("mock_dev_effect", {"resolves", "no_effect", "partial", "regresses_other", "deploy_fails"}),
 }
 
@@ -303,6 +312,15 @@ def validate_settings(settings: "Settings") -> None:
         errors.append("SANDBOX_PIDS_LIMIT must be at least 16")
     if settings.checkpoint_backend == "postgres" and not settings.database_url:
         errors.append("CHECKPOINT_BACKEND=postgres requires DATABASE_URL")
+    if settings.memory_mode == "hybrid":
+        if not settings.database_url:
+            errors.append("MEMORY_MODE=hybrid requires DATABASE_URL (a Postgres database with the pgvector extension)")
+        if settings.embedding_mode == "openai" and not os.environ.get(settings.embedding_api_key_env, ""):
+            errors.append(f"MEMORY_MODE=hybrid with EMBEDDING_MODE=openai requires {settings.embedding_api_key_env} (EMBEDDING_API_KEY_ENV)")
+    if not 1 <= settings.embedding_dimensions <= 2000:
+        errors.append("EMBEDDING_DIMENSIONS must be between 1 and 2000 (pgvector's HNSW limit)")
+    if not 0.0 <= settings.memory_semantic_floor < 1.0:
+        errors.append("MEMORY_SEMANTIC_FLOOR must be in [0, 1)")
     if not 0 <= settings.agent_run_max_resumes <= 5:
         errors.append("AGENT_RUN_MAX_RESUMES must be between 0 and 5")
     if not 0 <= settings.llm_max_retries <= 5:
@@ -502,4 +520,11 @@ def load_settings(base_dir: str | None = None) -> Settings:
         checkpoint_sqlite_file=os.getenv("CHECKPOINT_SQLITE_FILE", "").strip(),
         agent_run_max_resumes=_as_int(os.getenv("AGENT_RUN_MAX_RESUMES"), default=2),
         llm_max_retries=_as_int(os.getenv("LLM_MAX_RETRIES"), default=2),
+        memory_mode=os.getenv("MEMORY_MODE", "lexical").strip().lower(),
+        embedding_mode=os.getenv("EMBEDDING_MODE", "openai").strip().lower(),
+        embedding_base_url=(os.getenv("EMBEDDING_BASE_URL", "").strip() or os.getenv("LLM_BASE_URL", "https://api.openai.com/v1").strip()),
+        embedding_model=os.getenv("EMBEDDING_MODEL", "gemini-embedding-001").strip(),
+        embedding_api_key_env=os.getenv("EMBEDDING_API_KEY_ENV", "LLM_API_KEY").strip(),
+        embedding_dimensions=_as_int(os.getenv("EMBEDDING_DIMENSIONS"), default=768),
+        memory_semantic_floor=_as_float(os.getenv("MEMORY_SEMANTIC_FLOOR"), default=0.5),
     )

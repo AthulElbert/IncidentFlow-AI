@@ -17,6 +17,32 @@ from app.tools.sandbox import GitWorktreeProvider
 from app.tools.test_runners import ContainerTestRunner
 
 
+def build_memory(settings: Settings, incident_records: Callable[[], list[IncidentRecord]]):
+    """The incident memory, and the indexer that feeds it (None for lexical memory, which reads the records)."""
+    if settings.memory_mode != "hybrid":
+        return LexicalIncidentMemory(incident_records), None, "lexical"
+    import os
+
+    from app.services.memory_indexer import MemoryIndexer
+    from app.tools.document_store import PostgresDocumentStore
+    from app.tools.embeddings import HashingEmbedder, OpenAICompatibleEmbedder
+    from app.tools.hybrid_memory import HybridIncidentMemory
+
+    if settings.embedding_mode == "hashing":
+        embedder = HashingEmbedder(settings.embedding_dimensions)  # offline and not semantic: for demos and tests
+    else:
+        embedder = OpenAICompatibleEmbedder(
+            settings.embedding_base_url,
+            os.environ.get(settings.embedding_api_key_env, ""),
+            settings.embedding_model,
+            settings.embedding_dimensions,
+        )
+    store = PostgresDocumentStore(settings.database_url, settings.embedding_dimensions)
+    store.indexed_incidents(embedder.model)  # fail closed at startup: no database or no pgvector extension
+    memory = HybridIncidentMemory(store, embedder, floor=settings.memory_semantic_floor)
+    return memory, MemoryIndexer(store, embedder), f"hybrid:{embedder.model}"
+
+
 def _mcp(settings: Settings, families: list[str]):
     """Connect to the manifest's servers and check they offer the bound tools. Fails closed at startup."""
     from app.config import mcp_manifest_path
@@ -43,8 +69,13 @@ def build_toolkit(
     incident_records: Callable[[], list[IncidentRecord]],
     jenkins_client: JenkinsClient,
     base_dir: str | Path,
+    memory=None,
+    memory_mode: str | None = None,
 ) -> tuple[Toolkit, GitWorktreeProvider, dict[str, str]]:
-    """Build the tool layer from settings. Returns (toolkit, sandbox provider, mode per tool)."""
+    """Build the tool layer from settings. Returns (toolkit, sandbox provider, mode per tool).
+
+    `memory` is incident memory built by the caller (with `build_memory`, so it can also keep the indexer).
+    """
     modes: dict[str, str] = {}
     mcp_families = [
         family
@@ -128,12 +159,15 @@ def build_toolkit(
         )
         dev_metrics, modes["dev_metrics"] = MockDevEnvironment().metrics, "mock-fallback-startup"
 
-    modes["memory"] = "lexical"
+    if memory is None:
+        memory, _, modes["memory"] = build_memory(settings, incident_records)
+    else:
+        modes["memory"] = memory_mode or "lexical"
     toolkit = Toolkit(
         metrics=metrics,
         logs=logs,
         deploys=deploys,
-        memory=LexicalIncidentMemory(incident_records),
+        memory=memory,
         deploy_target=deploy_target,
         dev_metrics=dev_metrics,
         max_calls_per_run=settings.tool_max_calls_per_run,

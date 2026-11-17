@@ -222,6 +222,17 @@ Add a **retrieval evaluation set** beside the replay scenarios: queries with the
 
 Embedding requests send incident text to the embedding provider. Provide a local-endpoint option, and an `EMBEDDING_ALLOWED=false` switch that falls back to lexical.
 
+### 5.5 As implemented (step 8.6: `tools/embeddings.py`, `document_store.py`, `hybrid_memory.py`, `services/memory_indexer.py`)
+
+- **Measured before designing the score.** A probe of Gemini `gemini-embedding-001` (OpenAI-compatible `/embeddings`, `dimensions: 768`) showed cosines are never near zero: unrelated text against the nearest past incident 0.53 to 0.59, a same-domain incident with a different cause up to 0.66, the right incident 0.68 to 0.81. RRF scores are ranks, not similarities, and a raw cosine would make everything "similar" and raise a diagnosis' confidence. So **candidates come from both searches, RRF orders them, and meaning decides whether one counts**: score = `(cosine - floor) / (1 - floor)`, 0 below the floor, plus a 0.10 same-service boost; a candidate found only by shared words with no meaning above the floor is dropped. The Investigator's existing 0.30 threshold is unchanged.
+- **Floor chosen by the eval** (`app/memory_eval.py`, `scripts/eval_memory.py`): corpus of the 4 replay history incidents and the 3 distinct seed incidents; 9 queries that describe one in other words (7) or with its own keywords (2), and 4 about things nothing covers. Lexical: 2/9 found, 0/4 false matches. Hybrid, Gemini: floor 0.3 finds 9/9 but matches all 4 unrelated queries; **0.5 finds 9/9 (right one first each time) with 0/4 false matches**; 0.6 finds 5/9. At 0.5 a counted match needs a cosine of 0.65: 0.06 above the highest unrelated query, 0.03 below the lowest right match, and below two same-domain wrong incidents (0.655, 0.661), which can appear as lower-ranked second matches. A thin margin on 13 cases: the default for this model, to be re-run on real incidents.
+- **Storage.** `incident_documents_{dims}` (the column size is fixed, so the table is per dimension count), keyed by (doc_id, model): changing the model never mixes vectors, and `sync` indexes what the active model has not seen. HNSW `vector_cosine_ops`, GIN on a generated `tsvector`, an OR-of-words `to_tsquery` built only from `[a-z0-9]` tokens. The same protocol has an in-memory implementation for tests and the eval; the pgvector store returns the same neighbours, cosines and search results (tested).
+- **Indexing** is a hook on `OutcomeLearner` (on `resolved`) and on the finalise endpoint, plus a startup sync, not a separate bus consumer: the learner already consumes the bus idempotently and the sync catches up anything missed. Failures are logged and never raised.
+- **Finalised postmortems** (`ChangeRecord.postmortem`: markdown, author, time, revision), only once the change is closed. Sections indexed: diagnosis, what was changed, how it was checked, the people's notes, lessons (not the timeline or decisions).
+- **Agents** may pass `issue_type` to `memory.search` (registry `choices`, refused otherwise); both memories honour it. An embedding or database failure is a `ToolError`, which the agents already record as evidence that could not be collected.
+- **Privacy:** `MEMORY_MODE=lexical` (the default) sends nothing anywhere; `EMBEDDING_BASE_URL` can point at a local server. The embedder is its own small client with retries and Retry-After, not routed through the LLM router (Gemini reports no usage for embeddings, and there is no agent budget to charge).
+- **Verified:** 22 tests, two of them on a real pgvector (`pgvector/pgvector:pg16`, `TEST_PGVECTOR_URL`), including the app starting in hybrid mode and indexing its seed incidents; the eval with real Gemini embeddings both in memory and on pgvector (identical). **Not done:** `memory.get`, a `kind` filter, a re-index job when the model changes (rows of the old model are ignored and `sync` fills the new one), the embedding call through the LLM router, a real agent run with hybrid memory on a real model.
+
 ## 6. Workstream D: durable runs
 
 ### 6.1 Today
@@ -396,7 +407,7 @@ Gate 0  Run a real model through the existing system (prerequisite, not a build 
 | 8.3 | D: checkpointer, attempt-level resume, crash-loop guard | M, **done** |
 | 8.4 | B: registry, gap-driven follow-ups, re-diagnose edge | M, **done** |
 | 8.5 | A: MCP manager, manifest, Prometheus and GitHub backends, then Kubernetes evidence | L, **done in part** (manager, manifest, Prometheus/metrics/logs/deploys backends, checked with a third-party server; not GitHub or Kubernetes) |
-| 8.6 | C: schema, indexer, hybrid search, finalised postmortems, retrieval eval | L |
+| 8.6 | C: schema, indexer, hybrid search, finalised postmortems, retrieval eval | L, **done (section 5.5)** |
 | 8.7 | F 8.1 to 8.3: policy engine, scoped authorisation, OIDC | L |
 
 Each step ships separately, opt-in, with its own tests and a note in the "verified / not verified" list.
