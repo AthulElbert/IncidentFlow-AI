@@ -362,6 +362,15 @@ Today a role is global. Add ownership: `service -> owning team` in config, `Prin
 
 The JWT path already checks issuer, audience and algorithm. Add `AUTH_MODE=oidc`: fetch and cache the issuer's JWKS (with rotation), verify RS256 or ES256, map `roles`/`groups` claims to roles and teams, and keep API keys for service accounts. Tested with locally generated keys and a JWKS fixture; a real identity provider is not covered by tests.
 
+### 8.3a Policy, scoping and identity, as implemented (step 8.7: `app/policy/`, `policy/*.rego`, `security.py`)
+
+- **One engine for two decisions.** `PythonPolicy` (the reference, default) and `OpaPolicy` implement `promotion(facts)` and `authorize(request)`. Thresholds and the service's owning team travel in the input, so the Rego in `policy/` holds only logic and both engines decide from the same settings. Reason texts are identical; a table of 19 cases runs against both and passed against OPA 1.4.2 in Docker (`TEST_OPA_URL`), including number formatting (0.655 shows as 0.66 in both).
+- **Fails closed, without closing changes for good.** OPA unreachable at startup stops the app. A decision OPA cannot make (error, timeout, missing policy, a non-boolean, "allow" with reasons) is a refusal saying why. At approval an engine error decides nothing rather than recording `blocked_by_policy` (a terminal state); at promotion it refuses; on an action it is a 503.
+- **Decision logging.** `decision.approved` and `promotion.reserved` carry the gate decision (engine, bundle, allow, reasons); every scoped check writes `authz.allowed` or `authz.denied` with the policy decision. The bundle is a hash of the engine's source (Python) or of the incidentflow policies OPA reported at startup; a reload of OPA's rules afterwards is not noticed until the next start.
+- **Scoping** (`AUTHZ_MODE=scoped`, `SERVICE_OWNERSHIP_FILE`): checked on every change action (decide, promote, run agents, shadow run, execute dev, refresh, prepare PR, finalise postmortem), after the role check; reads are not scoped. Unowned services are admin-only. Separation of duties is unchanged. `GET /v1/changes/{id}/access` answers what the caller may do (roles and scope) without auditing, and the dashboard asks it with the approver and release keys and closes buttons with the reason (checked in a browser).
+- **OIDC** (`AUTH_MODE=oidc`): PyJWT's `PyJWKClient` with discovery (the document must name the same issuer), keys cached, one refetch for an unknown key id (rotation), `exp`/`iss`/`aud`/`sub` required, asymmetric algorithms only (the public key cannot be used as an HMAC secret: tested). Only known role names count; the most privileged becomes `role`, all are kept in `roles`; teams from `groups`. An unreachable provider is a 503, not a login failure. Identity endpoints must be https except on localhost.
+- **Verified:** 72 new tests; the parity table and an app-level test against real OPA; a live app with scoped authorisation on OPA, refusing an out-of-team approver and the dashboard showing why. **Not done:** a real identity provider (only a local stand-in serving a JWKS from generated keys), OPA bundles and their revision in decisions, tool-binding decisions in OPA, per-tenant data separation (reads are global).
+
 ### 8.4 Isolated test execution
 
 **A gap in the current design, worth stating plainly:** `FileSandbox.run_tests` runs the repository's test command on the **host** (with a scrubbed environment). Tests execute code, and the Fixer edits code, so model-written code can run on the host.
@@ -408,7 +417,7 @@ Gate 0  Run a real model through the existing system (prerequisite, not a build 
 | 8.4 | B: registry, gap-driven follow-ups, re-diagnose edge | M, **done** |
 | 8.5 | A: MCP manager, manifest, Prometheus and GitHub backends, then Kubernetes evidence | L, **done in part** (manager, manifest, Prometheus/metrics/logs/deploys backends, checked with a third-party server; not GitHub or Kubernetes) |
 | 8.6 | C: schema, indexer, hybrid search, finalised postmortems, retrieval eval | L, **done (section 5.5)** |
-| 8.7 | F 8.1 to 8.3: policy engine, scoped authorisation, OIDC | L |
+| 8.7 | F 8.1 to 8.3: policy engine, scoped authorisation, OIDC | L, **done (section 8.3a)** |
 
 Each step ships separately, opt-in, with its own tests and a note in the "verified / not verified" list.
 

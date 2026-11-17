@@ -75,7 +75,10 @@ def test_every_step_of_the_lifecycle_is_audited_with_the_real_actor(tmp_path):
         ("ready_for_prod", "promoting"),
         ("promoting", "promoted_to_prod"),
     ]
-    assert trail[2].details == {"comment": "ok"}
+    assert trail[2].details["comment"] == "ok"
+    # The gate's decision is kept with the action it allowed, naming the engine and the rules that made it
+    assert trail[2].details["policy"]["allow"] is True and trail[2].details["policy"]["engine"] == "python"
+    assert trail[3].details["policy"]["bundle"].startswith("python:")
 
 
 def test_each_audited_step_publishes_one_ordered_event_keyed_by_service(tmp_path):

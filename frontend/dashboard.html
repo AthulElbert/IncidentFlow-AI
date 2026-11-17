@@ -872,6 +872,18 @@
       return `<div class="facts">${rows.join("")}</div>`;
     }
 
+    // The review says whether an action is open at all; /access says whether it is open to the key that would take it
+    // (its role, and with AUTHZ_MODE=scoped, whether that person's team owns the service).
+    function applyAccess(review, approverAccess, releaseAccess) {
+      for (const action of review.actions) {
+        const access = action.role === "release_operator" ? releaseAccess : approverAccess;
+        const reason = access && access.actions ? access.actions[action.name] : "";
+        if (action.allowed && reason) {
+          action.allowed = false;
+          action.reason = `Not open to ${access.actor}: ${reason}`;
+        }
+      }
+    }
     function actionOf(review, name) { return review.actions.find((a) => a.name === name) || { allowed: false, reason: "" }; }
 
     function approvalPanel(review, c) {
@@ -1046,12 +1058,16 @@
     async function loadChangeDetail(changeId) {
       const seq = ++detailSeq;
       try {
-        const [c, review, identity] = await Promise.all([
+        const accessPath = `/v1/changes/${encodeURIComponent(changeId)}/access`;
+        const [c, review, identity, approverAccess, releaseAccess] = await Promise.all([
           api(`/v1/changes/${encodeURIComponent(changeId)}`, { role: "viewer" }),
           api(`/v1/changes/${encodeURIComponent(changeId)}/review`, { role: "viewer" }),
           loadIdentity(),
+          api(accessPath, { role: "approver" }).catch(() => null),
+          api(accessPath, { role: "release" }).catch(() => null),
         ]);
         if (seq !== detailSeq || changeId !== selectedChangeId) return; // a newer load or selection won
+        applyAccess(review, approverAccess, releaseAccess);
 
         // Keep what the person was in the middle of, and which sections they had open or shut.
         const sameChange = detailLoaded.id === changeId;

@@ -146,7 +146,8 @@ Format: **Q**, the answer, then **Follow-ups**.
 **Q: Explain separation of duties.**
 > "The person who approves can't be the person who promotes. It's enforced on the server when a promotion is requested. The UI mirrors it, so the promote button is disabled with a reason if the release key belongs to the approver, but the server is the authority."
 
-- *Follow-up: How does auth work?* "Three roles: viewer, approver, release operator, via API keys or JWT. Honestly that's demo-grade: for real use I'd put SSO in front."
+- *Follow-up: How does auth work?* "Three roles: viewer, approver, release operator. API keys for service accounts, and OIDC for people: tokens are checked against the identity provider's published keys, with rotation, and only asymmetric algorithms, so nobody can sign a token with the public key as an HMAC secret; I have a test for exactly that. Roles and teams come from the token. I've tested it against a local stand-in serving keys I generate, not a real provider."
+- *Follow-up: Can any approver approve anything?* "Not with scoping on. A service has an owning team, and an approver must be in it, or in the platform team. That's a policy decision, and the policy can run in Python or in OPA with Rego rules; one table of cases runs against both and they agree word for word. OPA fails closed, but carefully: if it's down when someone approves, nothing is decided, rather than marking the change blocked by policy, because that state is final. Every decision is in the audit log with which rules made it."
 - *Follow-up: What if auth is off?* "Then every request is the same synthetic actor, so a two-person rule can't be enforced, so it's switched off in that case and the system is meant for local use only."
 
 **Q: Walk me through promotion safety.**
@@ -292,7 +293,7 @@ Run with `AGENT_RUN_MODE=manual` and the local stand-in model. Narrate what each
 - **Usage spent by an interrupted stage isn't counted** after a resume.
 - **No background Jenkins polling;** promotions need a manual refresh.
 - **No automatic post-release monitoring or rollback.**
-- **No JavaScript tests;** auth is API-key/JWT, not SSO. Tests of model-written code run in a container, but the agents themselves run in-process.
+- **No JavaScript tests;** OIDC is tested against a local stand-in, not a real identity provider. Tests of model-written code run in a container, but the agents themselves run in-process.
 - **Demo-level:** mock backends for metrics, logs, Jenkins, Jira. The real interfaces exist.
 
 A line to use: *"I'd rather tell you what I haven't verified than have you find it."*

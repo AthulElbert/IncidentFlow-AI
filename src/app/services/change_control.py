@@ -17,6 +17,7 @@ from app.models.schemas import (
     ChangeRecord,
     PromoteRequest,
 )
+from app.policy import PolicyDecision, PolicyEngine, PythonPolicy, promotion_input
 from app.services.lifecycle import TERMINAL_STATES, assert_transition
 from app.storage import atomic_write_text
 
@@ -64,6 +65,17 @@ _PG_SCHEMA = (
 )
 
 
+class _LazyDecision(dict):
+    """Audit details for the policy decision made inside a write, filled in once `apply` has run."""
+
+    def __init__(self, gate: list) -> None:
+        super().__init__()
+        self._gate = gate
+
+    def resolve(self) -> dict | None:
+        return self._gate[-1].log() if self._gate else None
+
+
 class ConcurrentModificationError(RuntimeError):
     """A change record was modified by someone else between read and write."""
 
@@ -105,10 +117,12 @@ class ChangeControlStore:
         database_url: str = "",
         audit: AuditLog | None = None,
         bus: EventBus | None = None,
+        policy_engine: PolicyEngine | None = None,
     ) -> None:
         self.data_path = Path(data_file)
         self._lock = Lock()
         self.policy = policy or PolicyConfig()
+        self.policy_engine = policy_engine or PythonPolicy()
         self.storage_backend = storage_backend.strip().lower()
         self.database_url = database_url.strip()
         self.audit = audit
@@ -119,30 +133,12 @@ class ChangeControlStore:
 
     # ------------------------------------------------------------------ policy
 
+    def promotion_decision(self, record: ChangeRecord) -> PolicyDecision:
+        """The promotion gate's decision on this change, from the configured policy engine."""
+        return self.policy_engine.promotion(promotion_input(record, self.policy))
+
     def _evaluate_policy(self, record: ChangeRecord) -> list[str]:
-        reasons: list[str] = []
-
-        if record.confidence < self.policy.min_confidence_for_prod:
-            reasons.append(
-                f"confidence {record.confidence:.2f} below minimum {self.policy.min_confidence_for_prod:.2f}"
-            )
-
-        if self.policy.require_zero_warnings_for_prod and record.warning_count > 0:
-            reasons.append(f"warning_count {record.warning_count} must be 0")
-
-        allowed = {item.upper() for item in self.policy.allowed_jenkins_states_for_prod}
-        if record.jenkins_status.upper() not in allowed:
-            reasons.append(
-                f"jenkins_status {record.jenkins_status} not in allowed set {sorted(list(allowed))}"
-            )
-
-        if record.issue_type == "unknown":
-            reasons.append("issue_type unknown requires manual deep-dive")
-
-        if record.dev_execution_status != "passed":
-            reasons.append("dev execution evidence is not in passed state")
-
-        return reasons
+        return list(self.promotion_decision(record).reasons)
 
     # ----------------------------------------------------------------- queries
 
@@ -576,7 +572,10 @@ class ChangeControlStore:
         payload: ApprovalDecisionRequest,
         decided_by: str,
     ) -> ChangeRecord:
+        gate: list[PolicyDecision] = []
+
         def apply(record: ChangeRecord) -> ChangeRecord:
+            gate.clear()
             blocker = decision_blocker(record, payload.decision)
             if blocker:
                 raise ValueError(blocker)
@@ -594,7 +593,12 @@ class ChangeControlStore:
                     }
                 )
 
-            reasons = self._evaluate_policy(record)
+            decision = self.promotion_decision(record)
+            if decision.error:
+                # Not a policy outcome: recording `blocked_by_policy` would close the change for good.
+                raise ValueError(f"Nothing was decided: {decision.reasons[0]}")
+            gate.append(decision)
+            reasons = list(decision.reasons)
             return record.model_copy(
                 update={
                     "status": "approved",
@@ -607,15 +611,14 @@ class ChangeControlStore:
             )
 
         verb = "approved" if payload.decision == "approve" else "rejected"
-        return self._mutate(
-            change_id,
-            apply,
-            action=f"decision.{verb}",
-            actor=decided_by,
-            details={"comment": payload.comment},
-        )
+        details: dict = {"comment": payload.comment}
+        if payload.decision == "approve":
+            details["policy"] = _LazyDecision(gate)
+        return self._mutate(change_id, apply, action=f"decision.{verb}", actor=decided_by, details=details)
 
-    def promotion_blocker(self, record: ChangeRecord, promoted_by: str | None = None) -> str | None:
+    def promotion_blocker(
+        self, record: ChangeRecord, promoted_by: str | None = None, gate: list[PolicyDecision] | None = None
+    ) -> str | None:
         """Why this change cannot be promoted now, or None. With `promoted_by` it also applies separation of duties."""
         if record.deployment_state == "promoting":
             return "Change is already being promoted"
@@ -632,9 +635,11 @@ class ChangeControlStore:
             and record.decided_by == promoted_by
         ):
             return "Promotion requires a different actor than the approver"
-        reasons = self._evaluate_policy(record)
-        if reasons:
-            return "Promotion blocked by policy: " + "; ".join(reasons)
+        decision = self.promotion_decision(record)
+        if gate is not None:
+            gate.append(decision)
+        if not decision.allow:
+            return "Promotion blocked by policy: " + "; ".join(decision.reasons)
         return None
 
     def policy_reasons(self, record: ChangeRecord) -> list[str]:
@@ -648,8 +653,11 @@ class ChangeControlStore:
         or a retry is rejected instead of triggering another deploy.
         """
 
+        gate: list[PolicyDecision] = []
+
         def apply(record: ChangeRecord) -> ChangeRecord:
-            blocker = self.promotion_blocker(record, promoted_by)
+            gate.clear()
+            blocker = self.promotion_blocker(record, promoted_by, gate)
             if blocker:
                 raise ValueError(blocker)
 
@@ -668,7 +676,7 @@ class ChangeControlStore:
             apply,
             action="promotion.reserved",
             actor=promoted_by,
-            details={"comment": payload.comment},
+            details={"comment": payload.comment, "policy": _LazyDecision(gate)},
         )
 
     def finalize_promotion(
@@ -846,6 +854,9 @@ class ChangeControlStore:
         details: dict | None,
     ) -> tuple[AuditEntry, Event]:
         from_state = before.deployment_state if before else None
+        if details:
+            resolved = {k: (v.resolve() if isinstance(v, _LazyDecision) else v) for k, v in details.items()}
+            details = {k: v for k, v in resolved.items() if v is not None}
         entry = new_audit_entry(
             actor=actor,
             action=action,

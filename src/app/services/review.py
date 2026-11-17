@@ -53,6 +53,8 @@ ACTION_LABELS = {
     "promotion.success": "Promoted to production",
     "promotion.failed": "Production deploy failed",
     "promotion.queued": "Production deploy running",
+    "postmortem.finalized": "Postmortem finalised",
+    "authz.denied": "Refused: not permitted on this service",
 }
 
 _TERMINAL = {"promoted_to_prod", "prod_promotion_failed", "closed_rejected", "rolled_back", "resolved"}
@@ -166,6 +168,8 @@ def build_timeline(entries: list[AuditEntry]) -> list[dict[str, Any]]:
         group.clear()
 
     for entry in entries:
+        if entry.action == "authz.allowed":
+            continue  # the action it allowed is on the timeline itself
         if _family(entry.action):
             if group and (group[0].actor != entry.actor or _family(group[0].action) != _family(entry.action)):
                 flush()

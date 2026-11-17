@@ -181,6 +181,22 @@ class Settings:
     embedding_api_key_env: str = "LLM_API_KEY"
     embedding_dimensions: int = 768
     memory_semantic_floor: float = 0.5
+    policy_engine: str = "python"
+    opa_url: str = ""
+    opa_timeout_seconds: float = 2.0
+    authz_mode: str = "role"
+    service_ownership_file: str = ""
+    viewer_teams: str = ""
+    approver_teams: str = ""
+    release_operator_teams: str = ""
+    jwt_teams_claim: str = ""
+    oidc_issuer: str = ""
+    oidc_audience: str = ""
+    oidc_jwks_url: str = ""
+    oidc_algorithms: str = "RS256,ES256"
+    oidc_actor_claim: str = "sub"
+    oidc_roles_claim: str = "roles"
+    oidc_teams_claim: str = "groups"
 
 
 _TOOL_MODES = {
@@ -197,6 +213,9 @@ _TOOL_MODES = {
     "CHECKPOINT_BACKEND": ("checkpoint_backend", {"memory", "sqlite", "postgres"}),
     "SANDBOX_EXEC": ("sandbox_exec", {"host", "container"}),
     "MEMORY_MODE": ("memory_mode", {"lexical", "hybrid"}),
+    "POLICY_ENGINE": ("policy_engine", {"python", "opa"}),
+    "AUTHZ_MODE": ("authz_mode", {"role", "scoped"}),
+    "AUTH_MODE": ("auth_mode", {"api_key", "jwt", "hybrid", "oidc"}),
     "EMBEDDING_MODE": ("embedding_mode", {"openai", "hashing"}),
     "MOCK_DEV_EFFECT": ("mock_dev_effect", {"resolves", "no_effect", "partial", "regresses_other", "deploy_fails"}),
 }
@@ -226,6 +245,11 @@ def agent_editable_prefix(settings: "Settings", path: Path | None) -> str:
 
 def mcp_manifest_path(settings: "Settings") -> Path:
     path = Path(settings.mcp_manifest)
+    return path if path.is_absolute() else PROJECT_ROOT / path
+
+
+def ownership_file_path(settings: "Settings") -> Path:
+    path = Path(settings.service_ownership_file)
     return path if path.is_absolute() else PROJECT_ROOT / path
 
 
@@ -312,6 +336,39 @@ def validate_settings(settings: "Settings") -> None:
         errors.append("SANDBOX_PIDS_LIMIT must be at least 16")
     if settings.checkpoint_backend == "postgres" and not settings.database_url:
         errors.append("CHECKPOINT_BACKEND=postgres requires DATABASE_URL")
+    if settings.policy_engine == "opa" and not settings.opa_url:
+        errors.append("POLICY_ENGINE=opa requires OPA_URL (an OPA server with the rules in policy/ loaded)")
+    if not 0 < settings.opa_timeout_seconds <= 30:
+        errors.append("OPA_TIMEOUT_SECONDS must be in (0, 30]")
+    if settings.authz_mode == "scoped":
+        if not settings.auth_enabled:
+            errors.append("AUTHZ_MODE=scoped needs AUTH_ENABLED=true: without identities nobody belongs to a team")
+        if not settings.service_ownership_file:
+            errors.append("AUTHZ_MODE=scoped requires SERVICE_OWNERSHIP_FILE (see ops/service_owners.example.json)")
+        else:
+            from app.policy import load_ownership
+
+            editable = agent_editable_prefix(settings, ownership_file_path(settings))
+            if editable:
+                errors.append(f"SERVICE_OWNERSHIP_FILE is inside '{editable}', which agents may edit; keep it outside CODE_CHANGE_ALLOWED_PATHS")
+            try:
+                load_ownership(ownership_file_path(settings))
+            except ValueError as exc:
+                errors.append(f"SERVICE_OWNERSHIP_FILE: {exc}")
+    if settings.auth_mode == "oidc":
+        from app.security import OIDC_ALGORITHMS, check_endpoint
+
+        if not settings.oidc_issuer or not settings.oidc_audience:
+            errors.append("AUTH_MODE=oidc requires OIDC_ISSUER and OIDC_AUDIENCE")
+        for name, value in (("OIDC_ISSUER", settings.oidc_issuer), ("OIDC_JWKS_URL", settings.oidc_jwks_url)):
+            if value:
+                try:
+                    check_endpoint(value, name)
+                except ValueError as exc:
+                    errors.append(str(exc))
+        algorithms = {a.strip() for a in settings.oidc_algorithms.split(",") if a.strip()}
+        if not algorithms or algorithms - OIDC_ALGORITHMS:
+            errors.append(f"OIDC_ALGORITHMS must be asymmetric algorithms from {sorted(OIDC_ALGORITHMS)}")
     if settings.memory_mode == "hybrid":
         if not settings.database_url:
             errors.append("MEMORY_MODE=hybrid requires DATABASE_URL (a Postgres database with the pgvector extension)")
@@ -527,4 +584,20 @@ def load_settings(base_dir: str | None = None) -> Settings:
         embedding_api_key_env=os.getenv("EMBEDDING_API_KEY_ENV", "LLM_API_KEY").strip(),
         embedding_dimensions=_as_int(os.getenv("EMBEDDING_DIMENSIONS"), default=768),
         memory_semantic_floor=_as_float(os.getenv("MEMORY_SEMANTIC_FLOOR"), default=0.5),
+        policy_engine=os.getenv("POLICY_ENGINE", "python").strip().lower(),
+        opa_url=os.getenv("OPA_URL", "").strip(),
+        opa_timeout_seconds=_as_float(os.getenv("OPA_TIMEOUT_SECONDS"), default=2.0),
+        authz_mode=os.getenv("AUTHZ_MODE", "role").strip().lower(),
+        service_ownership_file=os.getenv("SERVICE_OWNERSHIP_FILE", "").strip(),
+        viewer_teams=os.getenv("VIEWER_TEAMS", "").strip(),
+        approver_teams=os.getenv("APPROVER_TEAMS", "").strip(),
+        release_operator_teams=os.getenv("RELEASE_OPERATOR_TEAMS", "").strip(),
+        jwt_teams_claim=os.getenv("JWT_TEAMS_CLAIM", "").strip(),
+        oidc_issuer=os.getenv("OIDC_ISSUER", "").strip(),
+        oidc_audience=os.getenv("OIDC_AUDIENCE", "").strip(),
+        oidc_jwks_url=os.getenv("OIDC_JWKS_URL", "").strip(),
+        oidc_algorithms=os.getenv("OIDC_ALGORITHMS", "RS256,ES256").strip(),
+        oidc_actor_claim=os.getenv("OIDC_ACTOR_CLAIM", "sub").strip(),
+        oidc_roles_claim=os.getenv("OIDC_ROLES_CLAIM", "roles").strip(),
+        oidc_teams_claim=os.getenv("OIDC_TEAMS_CLAIM", "groups").strip(),
     )

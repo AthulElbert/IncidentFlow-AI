@@ -130,7 +130,7 @@ def test_the_overview_is_small_newest_first_and_changes_version_when_the_change_
 def test_whoami_tells_the_screen_who_each_key_belongs_to(make_app):
     _, client = make_app()
 
-    assert client.get("/v1/whoami", headers=APPROVER).json() == {"actor": "approver-user", "role": "approver"}
+    assert client.get("/v1/whoami", headers=APPROVER).json() == {"actor": "approver-user", "role": "approver", "roles": ["approver"], "teams": []}
     assert client.get("/v1/whoami", headers=RELEASE).json()["role"] == "release_operator"
     assert client.get("/v1/whoami", headers=VIEWER).json()["role"] == "viewer"
     assert client.get("/v1/whoami").status_code == 401

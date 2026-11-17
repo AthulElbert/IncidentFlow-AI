@@ -449,6 +449,8 @@ Notes:
 - State changes must follow the lifecycle table in `src/app/services/lifecycle.py`; anything else is refused
 - Agent tools (`src/app/tools/`) are least-privilege: each agent gets only the methods it needs, every call is audited and counted against a per-run budget, and the repo sandbox refuses path escapes, secrets, CI/deploy files and oversized edits
 - Related alerts (same service + environment, within `CORRELATION_WINDOW_MINUTES`) are folded into one open change instead of opening one per alert
-- Policy gate before `ready_for_prod`
+- Policy gate before `ready_for_prod`, decided by `PythonPolicy` or, with `POLICY_ENGINE=opa`, by an OPA server running the Rego rules in `policy/` (the same rules: one table of cases checks they agree). OPA fails closed. Every gate and authorisation decision is audited with the engine and a hash of the rules that made it
 - Role-protected production promotion
+- **Service-scoped authorisation** (`AUTHZ_MODE=scoped`): an approver or release operator must be in the team that owns the service (`SERVICE_OWNERSHIP_FILE`), or in the admin team; a service with no owner is open to the admin team only. Refusals are audited and shown on the timeline; `GET /v1/changes/{id}/access` tells the dashboard what each key may do, so it closes a button with the reason
+- **OIDC sign-in** (`AUTH_MODE=oidc`): tokens are checked against the identity provider's published keys (cached, refetched once for an unknown key id, asymmetric algorithms only); roles and teams come from token claims; API keys still work for service accounts
 - Structured audit fields in change records

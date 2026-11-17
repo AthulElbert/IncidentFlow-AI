@@ -1,0 +1,9 @@
+{
+  "admin_team": "platform",
+  "services": {
+    "payments-service": "team-payments",
+    "orders-service": "team-orders",
+    "checkout-service": "team-checkout",
+    "faulty-project": "team-platform-demo"
+  }
+}

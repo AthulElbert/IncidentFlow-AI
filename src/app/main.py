@@ -31,7 +31,10 @@ from app.models.schemas import (
     PromoteRequest,
     PromoteResponse,
 )
-from app.security import AuthManager, Principal
+from app.audit import new_audit_entry
+from app.config import ownership_file_path
+from app.policy import OpaPolicy, PythonPolicy, authz_input, load_ownership
+from app.security import AuthManager, OidcVerifier, Principal
 from app.services.build_tracker import BuildTracker, promotion_result_for_status
 from app.services.change_control import ChangeControlStore, ConcurrentModificationError, PolicyConfig
 from app.services.code_fix_agent import CodeFixAgent
@@ -101,8 +104,14 @@ if settings.event_bus_mode == "kafka":
     consumer_bus = kafka_bus
     if settings.storage_backend != "postgres":
         event_bus = kafka_bus
+# Policy: the production gate and service-scoped authorisation, decided by the same engine. OPA fails closed: if it
+# cannot be reached at startup the app does not start, and a decision it cannot make is a refusal.
+policy_engine = OpaPolicy(settings.opa_url, settings.opa_timeout_seconds) if settings.policy_engine == "opa" else PythonPolicy()
+ownership = load_ownership(ownership_file_path(settings)) if settings.authz_mode == "scoped" else None
+
 change_store = ChangeControlStore(
     change_path,
+    policy_engine=policy_engine,
     policy=PolicyConfig(
         min_confidence_for_prod=settings.min_confidence_for_prod,
         require_zero_warnings_for_prod=settings.require_zero_warnings_for_prod,
@@ -299,9 +308,11 @@ auth = AuthManager(
     enabled=settings.auth_enabled,
     mode=settings.auth_mode,
     key_registry={
-        settings.viewer_api_key: Principal(actor=settings.viewer_actor, role="viewer", source="api_key"),
-        settings.approver_api_key: Principal(actor=settings.approver_actor, role="approver", source="api_key"),
-        settings.release_operator_api_key: Principal(actor=settings.release_operator_actor, role="release_operator", source="api_key"),
+        settings.viewer_api_key: Principal(actor=settings.viewer_actor, role="viewer", source="api_key", teams=frozenset(t.strip() for t in settings.viewer_teams.split(",") if t.strip())),
+        settings.approver_api_key: Principal(actor=settings.approver_actor, role="approver", source="api_key", teams=frozenset(t.strip() for t in settings.approver_teams.split(",") if t.strip())),
+        settings.release_operator_api_key: Principal(
+            actor=settings.release_operator_actor, role="release_operator", source="api_key", teams=frozenset(t.strip() for t in settings.release_operator_teams.split(",") if t.strip())
+        ),
     },
     jwt_secret=settings.jwt_secret,
     jwt_algorithm=settings.jwt_algorithm,
@@ -309,11 +320,60 @@ auth = AuthManager(
     jwt_audience=settings.jwt_audience,
     jwt_role_claim=settings.jwt_role_claim,
     jwt_actor_claim=settings.jwt_actor_claim,
+    jwt_teams_claim=settings.jwt_teams_claim,
+    oidc=OidcVerifier(
+        issuer=settings.oidc_issuer,
+        audience=settings.oidc_audience,
+        jwks_url=settings.oidc_jwks_url,
+        algorithms=tuple(a.strip() for a in settings.oidc_algorithms.split(",") if a.strip()),
+        actor_claim=settings.oidc_actor_claim,
+        roles_claim=settings.oidc_roles_claim,
+        teams_claim=settings.oidc_teams_claim,
+    )
+    if settings.auth_mode == "oidc"
+    else None,
 )
 
+APPROVER_ROLES = {"approver", "release_operator"}
 viewer_auth = auth.authorize({"viewer", "approver", "release_operator"})
-approver_auth = auth.authorize({"approver", "release_operator"})
+approver_auth = auth.authorize(APPROVER_ROLES)
 release_auth = auth.authorize({"release_operator"})
+
+
+def scope_decision(principal: Principal, action: str, service: str):
+    """Service-scoped authorisation (AUTHZ_MODE=scoped): None when not scoped, else the policy decision."""
+    if ownership is None or principal.source == "disabled":
+        return None
+    return policy_engine.authorize(authz_input(principal, action, service, ownership))
+
+
+def change_auth(action: str, roles: set[str]):
+    """The role check, then (when scoped) whether this person may act on this change's service. Both are audited."""
+    role_check = auth.authorize(roles)
+
+    def dependency(change_id: str, principal: Principal = Depends(role_check)) -> Principal:
+        record = change_store.get_change(change_id)
+        if record is None:
+            return principal  # the endpoint answers 404
+        decision = scope_decision(principal, action, record.service)
+        if decision is None:
+            return principal
+        audit_log.append(
+            new_audit_entry(
+                actor=principal.actor,
+                action="authz.allowed" if decision.allow else "authz.denied",
+                entity_id=change_id,
+                from_state=record.deployment_state,
+                to_state=record.deployment_state,
+                details={"action": action, "service": record.service, "reason": "; ".join(decision.reasons), "policy": decision.log()},
+            )
+        )
+        if not decision.allow:
+            status_code = 503 if decision.error else 403
+            raise HTTPException(status_code=status_code, detail="; ".join(decision.reasons))
+        return principal
+
+    return dependency
 
 logger.info(
     "support-agent-started",
@@ -339,6 +399,9 @@ logger.info(
         "min_confidence_for_prod": settings.min_confidence_for_prod,
         "auth_enabled": settings.auth_enabled,
         "auth_mode": settings.auth_mode,
+        "authz_mode": settings.authz_mode,
+        "policy_engine": policy_engine.name,
+        "policy_bundle": policy_engine.bundle,
     },
 )
 
@@ -481,7 +544,38 @@ def llm_status(principal: Principal = Depends(viewer_auth)) -> dict:
 @app.get("/v1/whoami")
 def whoami(principal: Principal = Depends(viewer_auth)) -> dict:
     """Who the credentials in this request belong to, so a screen can tell whether two actions are by the same person."""
-    return {"actor": principal.actor, "role": principal.role}
+    return {"actor": principal.actor, "role": principal.role, "roles": sorted(principal.all_roles), "teams": sorted(principal.teams)}
+
+
+# The review's actions and the role each needs (see services/review.build_actions).
+_REVIEW_ACTION_ROLES = {
+    "run_agents": APPROVER_ROLES,
+    "approve": APPROVER_ROLES,
+    "reject": APPROVER_ROLES,
+    "promote": {"release_operator"},
+    "refresh_status": APPROVER_ROLES,
+}
+_REVIEW_ACTION_POLICY_NAMES = {"approve": "decide", "reject": "decide"}
+
+
+@app.get("/v1/changes/{change_id}/access")
+def get_change_access(change_id: str, principal: Principal = Depends(viewer_auth)) -> dict:
+    """What the caller may do on this change, as far as roles and service ownership go ("" means allowed).
+
+    The review says whether an action is open at all; this says whether it is open to *you*. Not audited: it decides
+    nothing, and the action itself is checked again when it is taken.
+    """
+    record = change_store.get_change(change_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Change not found")
+    actions: dict[str, str] = {}
+    for name, roles in _REVIEW_ACTION_ROLES.items():
+        if principal.source != "disabled" and not (principal.all_roles & roles):
+            actions[name] = f"needs the {' or '.join(sorted(roles))} role"
+            continue
+        decision = scope_decision(principal, _REVIEW_ACTION_POLICY_NAMES.get(name, name), record.service)
+        actions[name] = "" if decision is None or decision.allow else "; ".join(decision.reasons)
+    return {"actor": principal.actor, "teams": sorted(principal.teams), "scoped": ownership is not None, "actions": actions}
 
 
 @app.get("/v1/changes/overview")
@@ -525,7 +619,7 @@ def get_change_postmortem(change_id: str, principal: Principal = Depends(viewer_
 
 @app.put("/v1/changes/{change_id}/postmortem")
 def finalize_change_postmortem(
-    change_id: str, payload: PostmortemFinalizeRequest, principal: Principal = Depends(approver_auth)
+    change_id: str, payload: PostmortemFinalizeRequest, principal: Principal = Depends(change_auth("finalize_postmortem", APPROVER_ROLES))
 ) -> dict:
     """A person signs off the postmortem. Its sections become searchable incident memory if the incident was resolved."""
     try:
@@ -573,7 +667,7 @@ def create_scenario_incident(name: str, principal: Principal = Depends(approver_
 
 
 @app.post("/v1/changes/{change_id}/investigate", status_code=202)
-def start_agent_run(change_id: str, principal: Principal = Depends(approver_auth)) -> dict:
+def start_agent_run(change_id: str, principal: Principal = Depends(change_auth("run_agents", APPROVER_ROLES))) -> dict:
     """Run the Investigator, Fixer, Verifier and Critic for this change, in the background."""
     if settings.agent_run_mode == "off":
         raise HTTPException(status_code=409, detail="Agent runs are disabled (AGENT_RUN_MODE=off)")
@@ -598,7 +692,7 @@ def start_agent_run(change_id: str, principal: Principal = Depends(approver_auth
 
 
 @app.post("/v1/changes/{change_id}/shadow-run", status_code=202)
-def start_shadow_run(change_id: str, principal: Principal = Depends(approver_auth)) -> dict:
+def start_shadow_run(change_id: str, principal: Principal = Depends(change_auth("shadow_run", APPROVER_ROLES))) -> dict:
     """Run the agents on this change in observe-only mode (AGENT_RUN_MODE=shadow). Never touches its state."""
     if settings.agent_run_mode != "shadow":
         raise HTTPException(status_code=409, detail="Shadow runs need AGENT_RUN_MODE=shadow")
@@ -669,7 +763,7 @@ def get_change(change_id: str, principal: Principal = Depends(viewer_auth)) -> C
 def execute_dev_fix(
     change_id: str,
     payload: DevExecuteRequest,
-    principal: Principal = Depends(approver_auth),
+    principal: Principal = Depends(change_auth("execute_dev", APPROVER_ROLES)),
 ) -> DevExecuteResponse:
     try:
         # Validate before triggering anything: a Jenkins build must not start for a change
@@ -704,7 +798,7 @@ def execute_dev_fix(
 
 
 @app.post("/v1/changes/{change_id}/refresh-status", response_model=ChangeRecord)
-def refresh_build_status(change_id: str, principal: Principal = Depends(approver_auth)) -> ChangeRecord:
+def refresh_build_status(change_id: str, principal: Principal = Depends(change_auth("refresh_status", APPROVER_ROLES))) -> ChangeRecord:
     """Poll Jenkins for a dev build or prod deploy that was still running when last checked."""
     try:
         return build_tracker.refresh(change_id, actor=principal.actor)
@@ -723,7 +817,7 @@ def refresh_build_status(change_id: str, principal: Principal = Depends(approver
 def prepare_pr(
     change_id: str,
     payload: PRPrepareRequest,
-    principal: Principal = Depends(approver_auth),
+    principal: Principal = Depends(change_auth("prepare_pr", APPROVER_ROLES)),
 ) -> PRPrepareResponse:
     record = change_store.get_change(change_id)
     if not record:
@@ -786,7 +880,7 @@ def prepare_pr(
 def decide_change(
     change_id: str,
     payload: ApprovalDecisionRequest,
-    principal: Principal = Depends(approver_auth),
+    principal: Principal = Depends(change_auth("decide", APPROVER_ROLES)),
 ) -> ApprovalDecisionResponse:
     try:
         updated = change_store.apply_decision(change_id, payload, decided_by=principal.actor)
@@ -810,7 +904,7 @@ def decide_change(
 def promote_change(
     change_id: str,
     payload: PromoteRequest,
-    principal: Principal = Depends(release_auth),
+    principal: Principal = Depends(change_auth("promote", {"release_operator"})),
 ) -> PromoteResponse:
     # 1. Validate and reserve the promotion. Nothing external has happened yet, so an
     #    unapproved, rejected, blocked, already-promoting or same-actor request ends here
