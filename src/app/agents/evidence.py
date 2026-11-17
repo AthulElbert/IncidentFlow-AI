@@ -100,6 +100,7 @@ class EvidenceLedger:
         self.service = service
         self.items: list[Evidence] = []
         self.warnings: list[str] = []
+        self.available_metrics: list[str] = []  # what the metrics backend offers for this service
         self._keys: set[str] = set()
 
     # ------------------------------------------------------------------ basics

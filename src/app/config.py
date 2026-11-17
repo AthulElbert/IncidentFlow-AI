@@ -137,6 +137,7 @@ class Settings:
     investigation_min_confidence: float = 0.60
     investigation_min_margin: float = 0.10
     investigation_max_llm_steps: int = 3
+    investigation_follow_ups: int = 0
     dev_metrics_mode: str = "mock"
     dev_metrics_base_url: str = ""
     mock_dev_effect: str = "resolves"
@@ -287,6 +288,8 @@ def validate_settings(settings: "Settings") -> None:
         errors.append("INVESTIGATOR_MODE=llm requires LLM_API_KEY")
     if not 0.0 < settings.investigation_min_confidence <= 1.0:
         errors.append("INVESTIGATION_MIN_CONFIDENCE must be in (0, 1]")
+    if not 0 <= settings.investigation_follow_ups <= 5:
+        errors.append("INVESTIGATION_FOLLOW_UPS must be between 0 and 5")
     if not 0.0 <= settings.investigation_min_margin < 1.0:
         errors.append("INVESTIGATION_MIN_MARGIN must be in [0, 1)")
     for env_name, active in (("FIXER_MODE", settings.fixer_mode == "llm"), ("CRITIC_MODE", settings.critic_mode == "llm")):
@@ -437,6 +440,7 @@ def load_settings(base_dir: str | None = None) -> Settings:
         investigation_min_confidence=_as_float(os.getenv("INVESTIGATION_MIN_CONFIDENCE"), default=0.60),
         investigation_min_margin=_as_float(os.getenv("INVESTIGATION_MIN_MARGIN"), default=0.10),
         investigation_max_llm_steps=_as_int(os.getenv("INVESTIGATION_MAX_LLM_STEPS"), default=3),
+        investigation_follow_ups=_as_int(os.getenv("INVESTIGATION_FOLLOW_UPS"), default=0),
         dev_metrics_mode=os.getenv("DEV_METRICS_MODE", "mock").strip().lower(),
         dev_metrics_base_url=os.getenv("DEV_METRICS_BASE_URL", "").strip(),
         mock_dev_effect=os.getenv("MOCK_DEV_EFFECT", "resolves").strip().lower(),

@@ -10,11 +10,12 @@ from typing import Any, Callable
 
 from app.adapters.llm_client import LLMClient
 from app.agents.evidence import clean_text
-from app.agents.models import Evidence, FixAttempt, FixProposal, Hypothesis, IncidentContext, tool_args
+from app.agents.models import Evidence, FixAttempt, FixProposal, Hypothesis, IncidentContext
 from app.agents.prompts import FIXER_FINAL_INSTRUCTION, FIXER_SYSTEM_PROMPT
 from app.agents.verifier import changed_paths
 from app.tools.base import ToolBudgetExceeded, ToolError, ToolNotPermitted
 from app.tools.instrumentation import AgentTools
+from app.tools.registry import ToolRequestError, validate_request
 
 logger = logging.getLogger("app.fixer")
 
@@ -22,7 +23,6 @@ MAX_READ_CHARS = 12_000
 MAX_LISTED_FILES = 200
 MAX_GREP_MATCHES = 30
 MAX_EVIDENCE_IN_PROMPT = 20
-MAX_EDIT_CHARS = 200_000
 MAX_TEXT = 1000
 
 
@@ -176,27 +176,27 @@ class Fixer:
 
     def _run_tool(self, request: dict[str, Any], tools: AgentTools, ctx_incident_id: str = "") -> dict[str, Any]:
         tool, method = request.get("tool"), request.get("method")
-        args = tool_args(request)
         try:
-            if (tool, method) == ("sandbox", "list_files"):
+            spec, args = validate_request("fixer", request)
+        except ToolRequestError as exc:
+            return {"error": str(exc)}
+        try:
+            if spec.id == "sandbox.list_files":
                 files = tools.sandbox.list_files(str(args.get("subdir", "")))
                 return {"files": files[:MAX_LISTED_FILES], "truncated": len(files) > MAX_LISTED_FILES}
-            if (tool, method) == ("sandbox", "read"):
-                text = tools.sandbox.read(str(args.get("path", "")))
-                return {"path": str(args.get("path", "")), "content": text[:MAX_READ_CHARS], "truncated": len(text) > MAX_READ_CHARS}
-            if (tool, method) == ("sandbox", "grep"):
-                matches = tools.sandbox.grep(str(args.get("pattern", "")), str(args.get("subdir", "")), MAX_GREP_MATCHES)
+            if spec.id == "sandbox.read":
+                text = tools.sandbox.read(args["path"])
+                return {"path": args["path"], "content": text[:MAX_READ_CHARS], "truncated": len(text) > MAX_READ_CHARS}
+            if spec.id == "sandbox.grep":
+                matches = tools.sandbox.grep(args["pattern"], str(args.get("subdir", "")), MAX_GREP_MATCHES)
                 return {"matches": [{"path": m.path, "line": m.line, "text": clean_text(m.text, 200)} for m in matches]}
-            if (tool, method) == ("sandbox", "edit"):
-                content = args.get("content")
-                if not isinstance(content, str) or len(content) > MAX_EDIT_CHARS:
-                    return {"error": "edit needs 'path' and the complete new 'content' as a string"}
-                result = tools.sandbox.edit(str(args.get("path", "")), content)
+            if spec.id == "sandbox.edit":
+                result = tools.sandbox.edit(args["path"], args["content"])
                 return {"path": result.path, "lines": result.lines, "changed": result.changed}
-            if (tool, method) == ("sandbox", "diff"):
+            if spec.id == "sandbox.diff":
                 return {"diff": tools.sandbox.diff()[:MAX_READ_CHARS]}
-            if (tool, method) == ("memory", "search"):
-                found = tools.memory.search(clean_text(str(args.get("text", "")), 300), k=3, exclude_ids=[ctx_incident_id])
+            if spec.id == "memory.search":
+                found = tools.memory.search(clean_text(args["text"], 300), k=3, exclude_ids=[ctx_incident_id])
                 return {
                     "matches": [
                         {"incident_id": m.incident_id, "issue_type": m.issue_type, "resolution": clean_text(m.resolution, 200)}

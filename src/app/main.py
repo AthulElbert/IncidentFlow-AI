@@ -188,6 +188,7 @@ investigator = Investigator(
     min_confidence=settings.investigation_min_confidence,
     min_margin=settings.investigation_min_margin,
     max_llm_steps=settings.investigation_max_llm_steps,
+    max_follow_ups=settings.investigation_follow_ups,
 )
 
 verifier = Verifier(

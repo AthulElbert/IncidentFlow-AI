@@ -1,6 +1,6 @@
 # IncidentFlow-AI: architecture v2 (design)
 
-Status: **design. Implemented so far: step 8.0 (first real-model run, section 9.1), workstream E (LLM routing, 7.3), D (durable runs, 6.6) and F's isolated test execution (8.5). The rest is not.** It extends `docs/ARCHITECTURE.md` (Phases 0 to 7, implemented). Where this document names a third-party API (MCP SDK, LangGraph checkpointers, pgvector, OPA) it is written from general knowledge and each is listed in section 12 to be verified against current documentation before coding.
+Status: **design. Implemented so far: step 8.0 (first real-model run, section 9.1), workstreams B (tool registry and follow-ups, 4.4), E (LLM routing, 7.3), D (durable runs, 6.6) and F's isolated test execution (8.5). The rest is not.** It extends `docs/ARCHITECTURE.md` (Phases 0 to 7, implemented). Where this document names a third-party API (MCP SDK, LangGraph checkpointers, pgvector, OPA) it is written from general knowledge and each is listed in section 12 to be verified against current documentation before coding.
 
 ## 1. Scope
 
@@ -151,6 +151,16 @@ Exposing IncidentFlow itself as an MCP server (for other tools to read cases). E
 ### 4.3 Not changing
 
 The baseline evidence plan stays fixed (it is what makes replay results comparable). Dynamic selection only adds follow-ups on top of it, within the existing tool budget.
+
+### 4.4 As implemented (step 8.4: `tools/registry.py`, `agents/followups.py`, `agents/graph.py`)
+
+- **Registry.** `REGISTRY` declares every tool method: who may call it, whose *model* may request it, read or write, an argument schema and the example a prompt shows. Permissions are derived from it (a test pins them to the old hand-written table, which they equal exactly); the Investigator's and Fixer's prompt examples are generated from it; every model request goes through `validate_request` before a handler runs. A request for a tool the agent's model may not use, a missing required argument or a wrong type is refused with a message naming what is allowed; numbers are kept in range (as the Investigator already did); unknown arguments are dropped. Checked at import: a model may only request a write inside its own worktree (`sandbox.edit`), and every example a model is shown validates. Handlers stay in the agents, as designed.
+- **Follow-ups** (`INVESTIGATION_FOLLOW_UPS`, 0 to 5, default 0). Only when the investigation would hand the incident to a person, and only without a model, the Investigator makes extra calls chosen from `scoring.missing_signals`: metrics of a missing kind it did not query, then keyword log searches over 180 minutes, then memory searches by issue type. It re-plans after each call and stops as soon as it would proceed. With a model, the same plan is offered as `suggested_requests`. Follow-ups go through the same validated path as a model's requests, count against the tool budget, and are listed on the report.
+- **Two departures from the design, found by running it.** "The two strongest causes" was the wrong scope: with thin evidence every cause scores near zero, so all causes are considered and ordered by kind. And a first test scenario was solved by the fixed plan after all, because backends list metrics alphabetically and the plan queries the first five: which metrics it sees depends on their names. That arbitrariness is the real gap follow-ups close.
+- **A scenario for it,** kept out of the regression set (`FOLLOW_UP_SCENARIOS`, replay `--scenarios all`): a noisy service whose pool timeouts are pushed out of the plan's 200-line log sample by health checks, and whose pool-wait metric sorts past the first five. Without follow-ups it is an unneeded escalation (the plan sees only rising latency); with them, one call finds the metric and the Investigator proceeds with the right cause. Written together with the rule it tests, like the others.
+- **Re-diagnosis.** When an attempt's fix applied, passed its tests and deployed but the alert metric did not recover, and the next-ranked diagnosis is at least `INVESTIGATION_MIN_CONFIDENCE` on its own, the next attempt fixes that diagnosis instead: the Fixer is told why, the change's issue type and confidence are updated, and `agent.rediagnosed` is audited. A weaker runner-up, or a fix that failed its own checks, keeps today's behaviour (retry the same diagnosis).
+- **Real model.** On Gemini (flash-lite), on the noisy scenario, the model took the first suggested request (the hidden metric), then ranked the wrong cause first; the evidence-based ranking overruled it and the Investigator proceeded with the right cause, with a warning recording the disagreement.
+- **Not done:** follow-ups are off by default because more evidence can, in principle, push a wrong cause over the threshold; the scenarios cannot show how often that happens on real incidents. The Critic still has no model tools.
 
 ## 5. Workstream C: hybrid RAG memory
 
@@ -374,7 +384,7 @@ Gate 0  Run a real model through the existing system (prerequisite, not a build 
 | 8.1 | E: router, retries, usage, token/cost budget | M, **done** |
 | 8.2 | F 8.4: container sandbox and the host-execution rule | M, **done** |
 | 8.3 | D: checkpointer, attempt-level resume, crash-loop guard | M, **done** |
-| 8.4 | B: registry, gap-driven follow-ups, re-diagnose edge | M |
+| 8.4 | B: registry, gap-driven follow-ups, re-diagnose edge | M, **done** |
 | 8.5 | A: MCP manager, manifest, Prometheus and GitHub backends, then Kubernetes evidence | L |
 | 8.6 | C: schema, indexer, hybrid search, finalised postmortems, retrieval eval | L |
 | 8.7 | F 8.1 to 8.3: policy engine, scoped authorisation, OIDC | L |

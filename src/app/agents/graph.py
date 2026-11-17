@@ -71,6 +71,7 @@ class RunState(TypedDict, total=False):
     outcome: str
     crashed: str
     budget_used: dict  # saved with every stage so a resumed run keeps counting from where it was
+    hypothesis: int  # which of the investigation's ranked diagnoses the current attempt is fixing (0 = the top one)
 
 
 def branch_for(change_id: str, service: str, namespace: str = "agent-fix") -> str:
@@ -216,7 +217,7 @@ def build_incident_graph(runtime: AgentRuntime, checkpointer: Any | None = None)
     def fix(state: RunState) -> dict:
         change_id, attempt = state["change_id"], state["attempt"]
         ctx = IncidentContext(**state["ctx"])
-        investigation = InvestigationReport(**state["investigation"])
+        investigation = diagnosis_for(state)
         # A worktree (a real git branch) is only created when the Fixer can use one.
         fresh = not runtime.has_sandbox(change_id)
         sandbox = runtime.sandbox_for(change_id, state["branch"]) if runtime.fixer.llm is not None else None
@@ -236,6 +237,7 @@ def build_incident_graph(runtime: AgentRuntime, checkpointer: Any | None = None)
         )
         entry = {
             "attempt": attempt,
+            "diagnosis": investigation.hypotheses[0].issue_type,
             "fix": {
                 "status": result.status,
                 "summary": result.summary,
@@ -251,6 +253,25 @@ def build_incident_graph(runtime: AgentRuntime, checkpointer: Any | None = None)
                 **escalate(state, "agent:fixer", f"the Fixer proposed no change: {result.reason or result.status}", {"attempts": attempts}),
             }
         return {"attempts": attempts, "proposal": result.proposal.model_dump(mode="json"), "next_step": "verify"}
+
+    def diagnosis_for(state: RunState) -> InvestigationReport:
+        """The investigation with the diagnosis the current attempt is fixing moved to the top."""
+        investigation = InvestigationReport(**state["investigation"])
+        index = int(state.get("hypothesis", 0))
+        if 0 < index < len(investigation.hypotheses):
+            chosen = investigation.hypotheses[index]
+            others = [h for i, h in enumerate(investigation.hypotheses) if i != index]
+            investigation = investigation.model_copy(update={"hypotheses": [chosen, *others]})
+        return investigation
+
+    def next_diagnosis(state: RunState) -> int | None:
+        """The next-ranked diagnosis strong enough to act on by itself, if there is one."""
+        hypotheses = InvestigationReport(**state["investigation"]).hypotheses
+        for index in range(int(state.get("hypothesis", 0)) + 1, len(hypotheses)):
+            candidate = hypotheses[index]
+            if candidate.issue_type != "unknown" and candidate.confidence >= runtime.investigator.min_confidence:
+                return index
+        return None
 
     def redo_attempt(state: RunState) -> dict | None:
         """After a restart the worktree this stage would check was not produced in this process. Redo the attempt.
@@ -269,7 +290,7 @@ def build_incident_graph(runtime: AgentRuntime, checkpointer: Any | None = None)
             return redo
         change_id, attempt = state["change_id"], state["attempt"]
         ctx = IncidentContext(**state["ctx"])
-        investigation = InvestigationReport(**state["investigation"])
+        investigation = diagnosis_for(state)
         sandbox = runtime.sandbox_for(change_id, state["branch"])
 
         store.record_agent_step(change_id, ORCHESTRATOR, "verifying", "agent.verifying", {"attempts": state["attempts"]})
@@ -292,6 +313,26 @@ def build_incident_graph(runtime: AgentRuntime, checkpointer: Any | None = None)
         if report.verdict == "passed":
             return {"verification": dump, "attempts": attempts, "next_step": "review"}
         if report.verdict == "failed" and attempt < runtime.max_attempts:
+            # The checks run in order, so a failed alert-metric check means the change applied, passed its tests and
+            # deployed, and the alert still did not clear. The diagnosis was probably wrong, not the fix: try the
+            # next one if it is strong enough on its own, instead of polishing a fix for the wrong cause.
+            metric = report.check("alert_metric_recovered")
+            switch_to = next_diagnosis(state) if metric is not None and metric.status == "failed" else None
+            if switch_to is not None:
+                revised = InvestigationReport(**state["investigation"]).hypotheses[switch_to]
+                old = investigation.hypotheses[0].issue_type
+                store.record_agent_step(
+                    change_id, ORCHESTRATOR, "verifying", "agent.rediagnosed", {"attempts": attempts},
+                    issue_type=revised.issue_type, confidence=revised.confidence,
+                    note=f"{old} -> {revised.issue_type} ({revised.confidence:.2f}): the fix did not move the alert metric",
+                )
+                feedback = (
+                    f"Your fix applied, passed its tests and deployed, but the alert metric did not recover, so the "
+                    f"diagnosis '{old}' was probably wrong. Treat the cause as '{revised.issue_type}' now: "
+                    f"{revised.root_cause}\n{report.feedback_for_fixer}"
+                )
+                return {"verification": dump, "attempts": attempts, "feedback": feedback, "hypothesis": switch_to,
+                        "next_step": "retry"}
             return {"verification": dump, "attempts": attempts, "feedback": report.feedback_for_fixer, "next_step": "retry"}
         if report.verdict == "failed":
             reason = f"verification failed on all {attempt} attempt(s):\n{report.feedback_for_fixer}"
@@ -305,7 +346,7 @@ def build_incident_graph(runtime: AgentRuntime, checkpointer: Any | None = None)
             return redo
         change_id, attempt = state["change_id"], state["attempt"]
         ctx = IncidentContext(**state["ctx"])
-        investigation = InvestigationReport(**state["investigation"])
+        investigation = diagnosis_for(state)
         verification = VerificationReport(**state["verification"])
         sandbox = runtime.sandbox_for(change_id, state["branch"])
 

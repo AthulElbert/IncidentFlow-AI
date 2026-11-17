@@ -208,6 +208,13 @@ Every model call goes through a router. With only the `LLM_*` settings it is one
 
 `GET /v1/llm/status` shows the routing and each endpoint's health. Token usage and cost of every call are recorded on the run and in the audit log (never the prompt or reply).
 
+### Tool registry, follow-up evidence and re-diagnosis
+
+Every tool an agent can use is declared once in `src/app/tools/registry.py`: who may call it, whether a model may ask for it, whether it writes, and its argument schema. Permissions and the example requests in prompts are generated from it, and every request a model makes is checked against it before anything runs. A model may only ask for a write inside its own worktree.
+
+- **Follow-up evidence** (`INVESTIGATION_FOLLOW_UPS`, default 0 = off). Before handing an incident to a person, the Investigator can make a few extra calls chosen from the signals the scoring says are missing: metrics it did not query, older or crowded-out log lines, past incidents of the expected kind. It stops as soon as it has enough to proceed. Try `python scripts/replay_investigations.py --scenarios all --follow-ups 3`.
+- **Re-diagnosis.** If a fix applied, passed its tests and deployed but the alert metric did not recover, and the second-ranked diagnosis is strong on its own, the next attempt fixes that one instead, and the change records the revised cause.
+
 ### Running a fix's tests in a container
 
 The Verifier runs the tests of a worktree the Fixer edited, and those tests execute code the Fixer's model may have written. `SANDBOX_EXEC=container` runs them in a locked-down container: no network, the worktree read-only, a read-only root filesystem, no Linux capabilities, an unprivileged user, memory, CPU and process limits, and none of the host's environment. Build the image once:

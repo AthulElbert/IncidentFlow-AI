@@ -133,6 +133,11 @@ Format: **Q**, the answer, then **Follow-ups**.
 
 - *Follow-up: How would you detect it after release?* "Honestly, that's a gap: there's no automatic post-release monitoring or rollback driven by the agents. I'd add a soak check and an automatic rollback proposal, with a person still deciding."
 
+**Q: Can the agents choose their own tools?**
+> "Within limits I set. Every tool is declared once in a registry: who may call it, whether a model may ask for it, whether it writes, and its argument schema. Permissions and the prompt examples come from it, and every model request is validated before it runs; a model can only write inside its own worktree. The Investigator can also choose extra evidence by itself, without a model: the scoring knows which signals each cause would show that haven't been seen, and it fetches those, stopping as soon as it's sure enough. With a real model I saw it take that suggestion, then rank the wrong cause, and the evidence-based ranking overrule it."
+
+- *Follow-up: What if the fix doesn't work?* "If the change applied, passed its tests and deployed but the alert metric didn't recover, the diagnosis was probably wrong, so the next attempt fixes the second-ranked cause if it's strong enough on its own. Otherwise it retries the same diagnosis with the failing checks as feedback, at most three attempts."
+
 **Q: What does the Fixer actually do? How does it avoid unbounded loops?**
 > "It runs a tool loop with a step limit: list files, read, search, edit, diff. It must finish with a summary or say there's no safe fix. Then bounded retries: if verification fails or the Critic sends it back, it retries on a reset worktree with the failing checks as feedback, at most three attempts. If verification is *inconclusive*, a Critic blocks, or there's no fix, it escalates immediately, because retrying can't create missing data."
 

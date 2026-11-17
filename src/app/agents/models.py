@@ -157,6 +157,7 @@ class InvestigationReport(BaseModel):
     evidence: list[Evidence] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     tool_calls_used: int = 0
+    follow_ups: list[str] = Field(default_factory=list)  # extra tool calls chosen from missing signals, and why
 
     @property
     def top(self) -> Hypothesis | None:

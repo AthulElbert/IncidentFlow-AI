@@ -47,6 +47,7 @@ def collect_evidence(ctx: IncidentContext, tools: AgentTools) -> EvidenceLedger:
 def _collect(ctx: IncidentContext, tools: AgentTools, ledger: EvidenceLedger) -> None:
     metric_window = window_for(ctx, METRICS_WINDOW_MINUTES)
     available = _call(ledger, "metrics.available_metrics", lambda: tools.metrics.available_metrics(ctx.service)) or []
+    ledger.available_metrics = list(available)
 
     names = [ctx.alert_metric] + [name for name in available if name != ctx.alert_metric][:MAX_EXTRA_METRICS]
     for name in names:

@@ -278,6 +278,38 @@ LOG_PROMPT_INJECTION = Scenario(
     tags=("deploy-correlated", "prompt-injection"),
 )
 
+# A noisy service: the database-pool timeouts are followed by hundreds of health-check lines, so the evidence
+# plan's latest-200-lines sample contains none of them; and the pool-wait metric sorts after the first five extra
+# metrics the plan queries (backends list metrics alphabetically), so the plan never looks at it.
+NOISY_DEPENDENCY_TIMEOUTS = Scenario(
+    name="noisy_dependency_timeouts",
+    service="ledger-service",
+    environment="prod",
+    alert_metric="latency_p95_seconds",
+    alert_message="ledger API p95 latency above 2s",
+    alert_threshold=2.0,
+    metrics={
+        "latency_p95_seconds": MetricShape(baseline=0.3, peak=3.1, onset_minutes=20, unit="seconds"),
+        "cpu_pct": MetricShape(baseline=40, peak=41, onset_minutes=20, unit="percent"),
+        "request_count": MetricShape(baseline=500, peak=505, onset_minutes=20),
+        "error_rate_pct": MetricShape(baseline=0.2, peak=0.25, onset_minutes=20, unit="percent"),
+        "disk_pct": MetricShape(baseline=55, peak=55, onset_minutes=20, unit="percent"),
+        "uptime_hours": MetricShape(baseline=100, peak=100.3, onset_minutes=20),
+        "write_pool_wait_ms": MetricShape(baseline=5, peak=900, onset_minutes=21, unit="ms"),
+    },
+    logs=[
+        _log(19, "ledger-service", "ERROR", "timeout acquiring connection from ledger-db pool after 800ms"),
+        _log(18, "ledger-service", "ERROR", "timeout acquiring connection from ledger-db pool after 800ms"),
+        _log(17, "ledger-service", "ERROR", "timeout acquiring connection from ledger-db pool after 800ms"),
+        *[_log(16 - i * 0.06, "ledger-service", "INFO", "GET /health 200") for i in range(240)],
+    ],
+    deploys=[],
+    expected_issue_type="dependency_failure",
+    expected_root_cause="ledger-db connection pool is exhausted; no recent deploy",
+    root_cause_keywords=("ledger-db", "pool"),
+    tags=("needs-follow-ups", "no-deploy"),
+)
+
 DEFAULT_SCENARIOS: tuple[Scenario, ...] = (
     BAD_DEPLOY_ERROR_SPIKE,
     DEPENDENCY_TIMEOUTS,
@@ -287,6 +319,12 @@ DEFAULT_SCENARIOS: tuple[Scenario, ...] = (
     RED_HERRING_DEPLOYS,
     LOG_PROMPT_INJECTION,
 )
+
+# Scenarios the fixed evidence plan cannot solve, written to exercise follow-up evidence (INVESTIGATION_FOLLOW_UPS).
+# Kept apart from DEFAULT_SCENARIOS, which is the stable regression set; like them, they were written together with
+# the rules they test, so they show the mechanism works, not how often it helps on real incidents.
+FOLLOW_UP_SCENARIOS: tuple[Scenario, ...] = (NOISY_DEPENDENCY_TIMEOUTS,)
+ALL_SCENARIOS: tuple[Scenario, ...] = DEFAULT_SCENARIOS + FOLLOW_UP_SCENARIOS
 
 
 def scenario_for(service: str, scenarios: tuple[Scenario, ...] | list[Scenario] = DEFAULT_SCENARIOS) -> Scenario | None:

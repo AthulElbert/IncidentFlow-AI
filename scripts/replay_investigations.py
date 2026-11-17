@@ -21,6 +21,7 @@ from app.agents.investigator import Investigator  # noqa: E402
 from app.config import load_settings  # noqa: E402
 from app.services.integration_factory import build_llm_router  # noqa: E402
 from app.replay import run_replay  # noqa: E402
+from app.tools.scenarios import ALL_SCENARIOS, DEFAULT_SCENARIOS  # noqa: E402
 
 
 def main() -> int:
@@ -29,6 +30,10 @@ def main() -> int:
     parser.add_argument("--no-history", action="store_true", help="run with an empty incident memory")
     parser.add_argument("--output", default=str(ROOT / "eval" / "investigation_report.json"))
     parser.add_argument("--allow-regression", action="store_true")
+    parser.add_argument("--scenarios", choices=["default", "all"], default="default",
+                        help="all = also the scenarios the fixed evidence plan cannot solve (see FOLLOW_UP_SCENARIOS)")
+    parser.add_argument("--follow-ups", type=int, default=None,
+                        help="extra tool calls chosen from missing signals before escalating (default: INVESTIGATION_FOLLOW_UPS)")
     args = parser.parse_args()
 
     settings = load_settings(str(ROOT))
@@ -46,14 +51,18 @@ def main() -> int:
         min_confidence=settings.investigation_min_confidence,
         min_margin=settings.investigation_min_margin,
         max_llm_steps=settings.investigation_max_llm_steps,
+        max_follow_ups=settings.investigation_follow_ups if args.follow_ups is None else args.follow_ups,
     )
-    summary = run_replay(investigator, history=[] if args.no_history else None)
+    scenarios = ALL_SCENARIOS if args.scenarios == "all" else DEFAULT_SCENARIOS
+    summary = run_replay(investigator, scenarios=scenarios, history=[] if args.no_history else None)
 
     print(f"{'scenario':26}{'expected':25}{'got':25}{'conf':>6}  {'decision':9} baseline")
     for r in summary.results:
         mark = "BAD" if r.outcome in ("proceeded_wrong", "proceeded_unsafely") else "ok "
         base = "ok" if r.baseline_correct else f"wrong ({r.baseline_issue_type})"
         print(f"{r.scenario:26}{r.expected_issue_type:25}{r.predicted_issue_type:25}{r.confidence:>6.2f}  {r.decision:9} {base}  [{mark}]")
+        for follow_up in r.follow_ups:
+            print(f"{'':28}follow-up: {follow_up}")
     data = summary.to_dict()
     print(
         f"\naccuracy {data['accuracy']:.0%} (baseline {data['baseline_accuracy']:.0%}) | "

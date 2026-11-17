@@ -119,6 +119,13 @@ def score_issue_type(issue_type: str, evidence: list[Evidence]) -> Candidate:
     return candidate
 
 
+def missing_signals(issue_type: str, evidence: list[Evidence]) -> list[Signal]:
+    """The signals this cause would show that the evidence does not, heaviest first."""
+    if issue_type not in SUPPORT:
+        return []
+    return sorted((s for s in SUPPORT[issue_type] if not _matching(evidence, s)), key=lambda s: -s.weight)
+
+
 def score_all(evidence: list[Evidence]) -> dict[str, Candidate]:
     """Score every issue type, including `unknown`, which rises as the others fall."""
     scored = {name: score_issue_type(name, evidence) for name in ISSUE_TYPES_SCORED}

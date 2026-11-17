@@ -60,6 +60,7 @@ class ScenarioResult:
     tool_calls: int
     mode_used: str
     warnings: list[str] = field(default_factory=list)
+    follow_ups: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -181,6 +182,7 @@ def run_replay(
             tool_calls=report.tool_calls_used,
             mode_used=report.mode_used,
             warnings=report.warnings,
+            follow_ups=report.follow_ups,
         )
         results.append(result)
         if on_result:

@@ -1,3 +1,7 @@
+"""System prompts for the agents' models. The example tool requests are generated from the tool registry, so a
+prompt can only ever offer what the agent is allowed to use."""
+from app.tools.registry import prompt_examples
+
 INVESTIGATOR_SYSTEM_PROMPT = """You are the Investigator in a production-support system. You explain why an alert fired.
 
 You are given an incident and a list of numbered evidence items (E1, E2, ...) that tools already collected.
@@ -15,10 +19,7 @@ You reply with ONE JSON object per turn, in one of two forms. Send only the obje
 fence before or after it. Tool arguments go inside "args".
 
 1) Ask for more evidence (at most the number of times given in "tool_requests_remaining"):
-   {"action": "tool", "tool": "logs", "method": "search", "args": {"query": "timeout", "minutes": 30}}
-   {"action": "tool", "tool": "metrics", "method": "query", "args": {"metric": "cpu_pct", "minutes": 60}}
-   {"action": "tool", "tool": "deploys", "method": "recent", "args": {"minutes": 180}}
-   {"action": "tool", "tool": "memory", "method": "search", "args": {"text": "connection pool exhausted"}}
+__INVESTIGATOR_TOOLS__
    "args.service" is optional and defaults to the incident's service.
 
 2) Give your final answer:
@@ -27,7 +28,7 @@ fence before or after it. Tool arguments go inside "args".
        "supporting": ["E1", "E3"], "contradicting": ["E5"]}
    ]}
    List 1 to 3 hypotheses, most likely first.
-"""
+""".replace("__INVESTIGATOR_TOOLS__", prompt_examples("investigator"))
 
 FINAL_ANSWER_INSTRUCTION = (
     "No more tool requests are available. Reply now with the final answer in the "
@@ -53,16 +54,11 @@ You reply with ONE JSON object per turn, in one of two forms. Send only the obje
 fence before or after it. Tool arguments go inside "args".
 
 1) Use a tool (you have a limited number of steps):
-   {"action": "tool", "tool": "sandbox", "method": "list_files", "args": {"subdir": "config"}}
-   {"action": "tool", "tool": "sandbox", "method": "read", "args": {"path": "config/app.json"}}
-   {"action": "tool", "tool": "sandbox", "method": "grep", "args": {"pattern": "latency_ms", "subdir": ""}}
-   {"action": "tool", "tool": "sandbox", "method": "edit", "args": {"path": "config/app.json", "content": "<the COMPLETE new file content>"}}
-   {"action": "tool", "tool": "sandbox", "method": "diff", "args": {}}
-   {"action": "tool", "tool": "memory", "method": "search", "args": {"text": "connection pool exhausted"}}
+__FIXER_TOOLS__
 
 2) Finish:
    {"action": "final", "summary": "one sentence on what you changed", "rationale": "why this addresses the cause", "no_fix": false}
-"""
+""".replace("__FIXER_TOOLS__", prompt_examples("fixer"))
 
 FIXER_FINAL_INSTRUCTION = (
     "You are out of tool steps. Reply now with the final answer in the "

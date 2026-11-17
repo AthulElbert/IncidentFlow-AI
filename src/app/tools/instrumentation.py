@@ -21,36 +21,15 @@ from app.tools.deploys import DeployHistoryTool
 from app.tools.logs import LogsTool
 from app.tools.memory import IncidentMemory
 from app.tools.metrics import MetricsTool
+from app.tools.registry import permissions as registry_permissions
 from app.tools.sandbox import RepoSandbox
 
 _MAX_ARG_CHARS = 200
 
-# agent -> tool -> methods it may call. Canary and rollback are deliberately in nobody's
-# list: production changes go through the governance layer, not through an agent tool.
-AGENT_PERMISSIONS: dict[str, dict[str, frozenset[str]]] = {
-    "investigator": {
-        "metrics": frozenset({"available_metrics", "query"}),
-        "logs": frozenset({"search"}),
-        "deploys": frozenset({"recent"}),
-        "memory": frozenset({"search"}),
-    },
-    "fixer": {
-        "sandbox": frozenset({"list_files", "read", "grep", "edit", "diff"}),
-        "memory": frozenset({"search"}),
-    },
-    "verifier": {
-        "sandbox": frozenset({"list_files", "read", "grep", "diff", "run_tests"}),
-        "deploy_target": frozenset({"deploy_dev", "get_status"}),
-        # The incident as production saw it, and the dev environment after the fix is deployed.
-        "metrics": frozenset({"available_metrics", "query"}),
-        "dev_metrics": frozenset({"available_metrics", "query"}),
-    },
-    "critic": {
-        "sandbox": frozenset({"list_files", "read", "grep", "diff"}),
-        "deploys": frozenset({"recent"}),
-        "memory": frozenset({"search"}),
-    },
-}
+# agent -> tool -> methods it may call, derived from the tool registry (tools/registry.py), which is the only
+# place access is granted. Canary and rollback are deliberately declared for nobody: production changes go
+# through the governance layer, not through an agent tool.
+AGENT_PERMISSIONS: dict[str, dict[str, frozenset[str]]] = registry_permissions()
 
 
 class ToolBudget:

@@ -11,10 +11,12 @@ from typing import Any, Callable
 from app.adapters.llm_client import LLMClient
 from app.agents.collector import collect_evidence, window_for
 from app.agents.evidence import EvidenceLedger, clean_text
-from app.agents.models import ISSUE_TYPES, Evidence, Hypothesis, IncidentContext, InvestigationReport, tool_args
+from app.agents.followups import plan_follow_ups
+from app.agents.models import ISSUE_TYPES, Evidence, Hypothesis, IncidentContext, InvestigationReport
 from app.agents.prompts import FINAL_ANSWER_INSTRUCTION, INVESTIGATOR_SYSTEM_PROMPT
 from app.agents.scoring import Candidate, score_all
-from app.tools.base import ToolError
+from app.tools.base import ToolBudgetExceeded, ToolError
+from app.tools.registry import ToolRequestError, validate_request
 from app.tools.instrumentation import AgentTools
 
 logger = logging.getLogger("app.investigator")
@@ -61,11 +63,14 @@ class Investigator:
         min_confidence: float = 0.60,
         min_margin: float = 0.10,
         max_llm_steps: int = 3,
+        max_follow_ups: int = 0,
     ) -> None:
         self.llm = llm
         self.min_confidence = min_confidence
         self.min_margin = min_margin
         self.max_llm_steps = max(0, max_llm_steps)
+        # Extra tool calls chosen from missing signals, made only when the incident would otherwise go to a person.
+        self.max_follow_ups = max(0, max_follow_ups)
 
     # ------------------------------------------------------------------ public
 
@@ -74,6 +79,11 @@ class Investigator:
     ) -> InvestigationReport:
         ledger = collect_evidence(ctx, tools)
         hypotheses = self._hypotheses(score_all(ledger.items), ledger)
+        followed: list[str] = []
+        if self.llm is None and self.max_follow_ups and self._decide(hypotheses)[0] == "escalate":
+            followed = self._follow_up(ctx, tools, ledger)
+            if followed:
+                hypotheses = self._hypotheses(score_all(ledger.items), ledger)
         warnings = list(ledger.warnings)
         mode = "heuristic"
 
@@ -98,7 +108,33 @@ class Investigator:
             evidence=ledger.items,
             warnings=warnings,
             tool_calls_used=tools.calls_used,
+            follow_ups=followed,
         )
+
+    def _follow_up(self, ctx: IncidentContext, tools: AgentTools, ledger: EvidenceLedger) -> list[str]:
+        """Make follow-up calls through the same checked path a model's requests take.
+
+        The plan is redone after every call, because new evidence changes what is still missing, and it stops as
+        soon as the investigation would proceed: a further call could only cost budget.
+        """
+        done: list[str] = []
+        tried: set[str] = set()
+        for _ in range(self.max_follow_ups):
+            plans = plan_follow_ups(score_all(ledger.items), ledger, ctx, self.max_follow_ups + len(tried))
+            plan = next((p for p in plans if p.key() not in tried), None)
+            if plan is None:
+                break
+            tried.add(plan.key())
+            try:
+                observation = self._run_tool_request(plan.request(), ctx, tools, ledger)
+            except ToolBudgetExceeded as exc:
+                ledger.warnings.append(f"follow-ups stopped: {exc}")
+                break
+            found = len(observation.get("new_evidence", [])) if isinstance(observation, dict) else 0
+            done.append(f"{plan.tool}.{plan.method}({_describe_args(plan.args)}): {found} new evidence item(s); because {plan.why}")
+            if self._decide(self._hypotheses(score_all(ledger.items), ledger))[0] == "proceed":
+                break
+        return done
 
     # --------------------------------------------------------------- hypotheses
 
@@ -183,9 +219,8 @@ class Investigator:
 
         raise ValueError("model did not give a final answer")
 
-    @staticmethod
-    def _prompt_payload(ctx: IncidentContext, ledger: EvidenceLedger, steps: int) -> dict[str, Any]:
-        return {
+    def _prompt_payload(self, ctx: IncidentContext, ledger: EvidenceLedger, steps: int) -> dict[str, Any]:
+        payload = {
             "incident": {
                 "service": ctx.service,
                 "environment": ctx.environment,
@@ -198,37 +233,42 @@ class Investigator:
             "evidence": [_evidence_for_prompt(item) for item in ledger.items],
             "tool_requests_remaining": steps,
         }
+        # The same follow-ups the evidence-only mode would make, offered as suggestions the model may take.
+        suggestions = plan_follow_ups(score_all(ledger.items), ledger, ctx, min(3, steps))
+        if suggestions:
+            payload["suggested_requests"] = [{"request": s.request(), "why": s.why} for s in suggestions]
+        return payload
 
     def _run_tool_request(
         self, request: dict[str, Any], ctx: IncidentContext, tools: AgentTools, ledger: EvidenceLedger
     ) -> dict[str, Any]:
         tool, method = request.get("tool"), request.get("method")
-        args = tool_args(request)
-        service = clean_text(str(args.get("service") or ctx.service), 80)
         try:
-            minutes = min(240.0, max(5.0, float(args.get("minutes", 60))))
-        except (TypeError, ValueError):
-            minutes = 60.0
+            spec, args = validate_request("investigator", request)
+        except ToolRequestError as exc:
+            return {"error": str(exc)}
+        service = clean_text(str(args.get("service") or ctx.service), 80)
+        minutes = float(args.get("minutes", 60))  # already kept within the declared range
         window = window_for(ctx, minutes)
 
         try:
-            if (tool, method) == ("logs", "search"):
+            if spec.id == "logs.search":
                 query = clean_text(str(args.get("query", "")), 100)
                 lines = tools.logs.search(service, query, window, limit=50)
                 new = ledger.add_logs(lines, source=f"logs.search({service}, {query!r})", service=service)
                 quotes = [clean_text(line.message, 160) for line in lines[-10:]]
                 return {"new_evidence": [_evidence_for_prompt(e) for e in new], "log_lines_returned": len(lines), "quotes": quotes}
-            if (tool, method) == ("metrics", "query"):
-                metric = clean_text(str(args.get("metric", "")), 80)
+            if spec.id == "metrics.query":
+                metric = clean_text(str(args["metric"]), 80)
                 series = tools.metrics.query(service, metric, window)
                 added = ledger.add_metric(series, source=f"metrics.query({service}, {metric})")
                 return {"new_evidence": [_evidence_for_prompt(added)] if added else [], "points": len(series.points)}
-            if (tool, method) == ("deploys", "recent"):
+            if spec.id == "deploys.recent":
                 deploys = tools.deploys.recent(service, window)
                 new = ledger.add_deploys(deploys, int(minutes), source=f"deploys.recent({service})", service=service)
                 return {"new_evidence": [_evidence_for_prompt(e) for e in new], "deploys_returned": len(deploys)}
-            if (tool, method) == ("memory", "search"):
-                text = clean_text(str(args.get("text", "")), 300)
+            if spec.id == "memory.search":
+                text = clean_text(str(args["text"]), 300)
                 results = tools.memory.search(text, service=service, k=3, exclude_ids=[ctx.incident_id])
                 new = ledger.add_similar(results, source="memory.search")
                 return {"new_evidence": [_evidence_for_prompt(e) for e in new], "matches": len(results)}
@@ -279,6 +319,10 @@ class Investigator:
                 f"({result[proposals[0][0]].confidence:.2f} vs {strongest.confidence:.2f}); ranked by evidence"
             )
         return [h.model_copy(update={"rank": rank}) for rank, h in enumerate(ordered, start=1)]
+
+
+def _describe_args(args: dict[str, Any]) -> str:
+    return ", ".join(f"{key}={value!r}" for key, value in args.items())
 
 
 def _evidence_for_prompt(item: Evidence) -> dict[str, Any]:
